@@ -23,7 +23,7 @@ jobs:
           # showLastUpdateTime reads the git history to date each page, and a
           # shallow clone dates every one of them from the checkout instead.
           fetch-depth: 0
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm

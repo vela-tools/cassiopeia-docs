@@ -259,15 +259,24 @@ const config: Config = {
           // the next release, copy both and add the version to versions.json —
           // `docusaurus docs:version` needs a current version and won't work.
           includeCurrentVersion: false,
+          // Only the newest version is indexable. An archived version repeats
+          // the current one almost word for word, down to the title and the
+          // description, so leaving all three open puts three URLs in front of
+          // a search engine for one query and lets it pick. noIndex keeps the
+          // pages reachable for anyone pinned to an older release while taking
+          // them out of that contest; the matching sitemap exclusion below
+          // stops the site advertising URLs it asks not to be indexed.
           versions: {
             '1.0.2': {
               label: 'v1.0.2',
             },
             '1.0.1': {
               label: 'v1.0.1',
+              noIndex: true,
             },
             '1.0.0': {
               label: 'v1.0.0',
+              noIndex: true,
             },
           },
           // Feeds the sitemap's <lastmod> from git and shows a freshness date
@@ -284,7 +293,15 @@ const config: Config = {
           changefreq: null,
           priority: null,
           lastmod: 'date',
-          ignorePatterns: ['**/search', '**/tags/**'],
+          // The archived versions are noIndex (see the versions map above), so
+          // listing them here would ask a crawler to fetch what it is then told
+          // to drop. Update this when a version stops being the newest.
+          ignorePatterns: [
+            '**/search',
+            '**/tags/**',
+            '/docs/1.0.0/**',
+            '/docs/1.0.1/**',
+          ],
         },
       } satisfies Preset.Options,
     ],
