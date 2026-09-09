@@ -32,6 +32,15 @@ jobs:
       # there fails the site at build time rather than in review.
       - name: Typecheck
         run: npm run typecheck
+      # The example pages under versioned_docs are copies; the examples
+      # repository owns them. This re-runs the sync against the commit
+      # examples.lock pins and fails if the result differs, which catches a page
+      # edited here instead of at the source. Pinned rather than tracking main,
+      # so an unrelated pull request does not fail because the examples
+      # repository moved overnight.
+      - name: Check the synced example pages
+        run: npm run sync:examples:check -- --locked
+
       # onBrokenLinks is 'throw', so this leg is also the internal link check.
       - name: Build
         run: npm run build

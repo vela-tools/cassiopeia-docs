@@ -55,6 +55,47 @@
           ]
         }
       ]
+    },
+    {
+      "type": "category",
+      "label": "Examples",
+      "link": {
+        "type": "doc",
+        "id": "examples/index"
+      },
+      "items": [
+        "examples/01-json-field-mapping/index",
+        "examples/02-json-id-collision/index",
+        "examples/03-geojson-smart-data-model/index",
+        "examples/04-csv-conditionals/index",
+        "examples/05-geojson-attribute-guards/index",
+        "examples/06-csv-messy-headers/index",
+        "examples/07-csv-observed-at/index",
+        "examples/08-json-language-property/index",
+        "examples/09-csv-manifest/index",
+        "examples/10-json-relationships/index",
+        "examples/11-csv-relationship-graph/index",
+        "examples/12-csv-list-relationship/index",
+        "examples/13-json-synthetic-entities/index",
+        "examples/14-xml-unit-code/index",
+        "examples/15-shapefile-enum-decoding/index",
+        "examples/16-kmz-folder-namespacing/index",
+        "examples/17-kml-folder-collections/index",
+        "examples/18-grib1-derived-values/index",
+        "examples/19-grib2-byte-range/index",
+        "examples/20-csv-at-context/index",
+        "examples/21-json-dataset-id/index",
+        "examples/22-csv-broker-temporal/index",
+        "examples/23-json-scheduling/index",
+        "examples/24-json-list-property/index",
+        "examples/25-geojson-json-property/index",
+        "examples/26-csv-vocab-property/index",
+        "examples/27-csv-custom-schema/index",
+        "examples/28-json-advanced-schema/index",
+        "examples/29-csv-multi-attribute-relationship/index",
+        "examples/30-csv-nested-relationship/index",
+        "examples/31-geojson-geometry-conversion/index"
+      ]
     }
   ]
 }

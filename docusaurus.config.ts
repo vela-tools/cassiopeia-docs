@@ -259,6 +259,12 @@ const config: Config = {
           // the next release, copy both and add the version to versions.json —
           // `docusaurus docs:version` needs a current version and won't work.
           includeCurrentVersion: false,
+          // The example directories are numbered, and that number is the
+          // reading order rather than a sorting artefact to be stripped. Off,
+          // the id and the URL keep it, matching the directory names in the
+          // examples repository. Ordering comes from sidebar_position in the
+          // front matter, which the sync writes.
+          numberPrefixParser: false,
           // Only the newest version is indexable. An archived version repeats
           // the current one almost word for word, down to the title and the
           // description, so leaving all three open puts three URLs in front of
