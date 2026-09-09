@@ -1,0 +1,36 @@
+name: Unclear or missing documentation
+description: A topic has no page, or a page assumes something it never explains.
+labels: ["documentation"]
+body:
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Which is it
+      options:
+        - A topic with no page
+        - A page that skips a step
+        - A page that assumes knowledge it never introduces
+        - A link that goes nowhere
+    validations:
+      required: true
+  - type: input
+    id: page
+    attributes:
+      label: Page
+      description: The URL, or the path under versioned_docs. Leave blank if the topic has no page at all.
+    validations:
+      required: false
+  - type: textarea
+    id: goal
+    attributes:
+      label: What were you trying to do
+      description: Describe the data and the outcome you wanted, rather than the page you would write. The shape of the problem decides where the answer belongs.
+    validations:
+      required: true
+  - type: textarea
+    id: found
+    attributes:
+      label: Where did you look, and what did you find
+      description: Which pages you read, and how you eventually worked it out, if you did.
+    validations:
+      required: true

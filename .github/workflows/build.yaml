@@ -1,0 +1,37 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: npm run build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # showLastUpdateTime reads the git history to date each page, and a
+          # shallow clone dates every one of them from the checkout instead.
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # The config and the theme components are TypeScript, and a type error
+      # there fails the site at build time rather than in review.
+      - name: Typecheck
+        run: npm run typecheck
+      # onBrokenLinks is 'throw', so this leg is also the internal link check.
+      - name: Build
+        run: npm run build

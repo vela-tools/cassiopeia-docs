@@ -1,0 +1,34 @@
+# Cassiopeia documentation — https://vela-tools.github.io/cassiopeia/
+#
+# NOTE: crawlers only read robots.txt from a domain root. While this site is
+# served from a project path on github.io, the authoritative file is
+# https://vela-tools.github.io/robots.txt and this copy is advisory. It becomes
+# authoritative as soon as the site moves to its own domain.
+
+User-agent: *
+Allow: /
+
+# Machine-readable copies of the documentation, for assistants that look for
+# them: /cassiopeia/llms.txt (index) and /cassiopeia/llms-full.txt (everything).
+User-agent: GPTBot
+Allow: /
+
+User-agent: OAI-SearchBot
+Allow: /
+
+User-agent: ChatGPT-User
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: Claude-SearchBot
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+Sitemap: https://vela-tools.github.io/cassiopeia/sitemap.xml

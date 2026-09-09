@@ -1,0 +1,44 @@
+.community {
+  padding: 0 0 4.5rem;
+}
+
+.title {
+  text-align: center;
+  font-size: 1.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.lead {
+  text-align: center;
+  max-width: 40rem;
+  margin: 0 auto 2.25rem;
+  font-size: 1rem;
+  color: var(--ifm-color-emphasis-800);
+}
+
+.links {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1.5rem;
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 0;
+  list-style: none;
+}
+
+
+
+.contact {
+  max-width: 42rem;
+  margin: 2.5rem auto 0;
+  text-align: center;
+  font-size: 0.85rem;
+  color: var(--ifm-color-emphasis-700);
+}
+
+@media screen and (max-width: 996px) {
+  .links {
+    grid-template-columns: 1fr 1fr;
+    gap: 1.25rem;
+  }
+}

@@ -1,0 +1,60 @@
+{
+  "docs": [
+    "index",
+    {
+      "type": "category",
+      "label": "Guides",
+      "collapsed": false,
+      "items": [
+        "guides/getting-started",
+        "guides/concepts",
+        {
+          "type": "category",
+          "label": "Authoring",
+          "items": [
+            "guides/source-formats",
+            "guides/mapping",
+            "guides/templates",
+            "guides/data-models"
+          ]
+        },
+        {
+          "type": "category",
+          "label": "Output & validation",
+          "items": [
+            "guides/output",
+            "guides/representations",
+            "guides/validation"
+          ]
+        },
+        {
+          "type": "category",
+          "label": "Running & automation",
+          "items": [
+            "guides/running",
+            "guides/manifests",
+            "guides/scheduling"
+          ]
+        }
+      ]
+    },
+    {
+      "type": "category",
+      "label": "Reference",
+      "items": [
+        "reference/cli",
+        "reference/docker",
+        "reference/tui",
+        "reference/architecture",
+        {
+          "type": "category",
+          "label": "NGSI-LD",
+          "items": [
+            "reference/ngsi-ld/attribute-types",
+            "reference/ngsi-ld/representations"
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,225 @@
+// Webfonts (Roboto, Audiowide, Iosevka) load from <head> via headTags in
+// docusaurus.config.ts, not with @import, so they do not queue behind this
+// stylesheet.
+
+.navbar__title {
+  font-family: 'Audiowide', sans-serif !important;
+  font-size: 25px;
+  font-weight: 400;
+  padding-top: 0.25rem;
+}
+
+body {
+  font-family: 'Roboto', sans-serif !important;
+}
+
+code {
+  font-family: 'Iosevka Web', monospace !important;
+}
+
+// Brand purples: primary #7C3AED, secondary #4B1AB0
+:root {
+  --ifm-color-primary: #7c3aed;
+  --ifm-color-primary-dark: #7034d5;
+  --ifm-color-primary-darker: #6931c9;
+  --ifm-color-primary-darkest: #5729a6;
+  --ifm-color-primary-light: #8840ff;
+  --ifm-color-primary-lighter: #8f43ff;
+  --ifm-color-primary-lightest: #a14bff;
+  --ifm-code-font-size: 95%;
+  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.1);
+  --ifm-tabs-padding-vertical: 0.4rem !important;
+}
+
+// Lighter base (#9D6BF2) for contrast on dark backgrounds
+[data-theme='dark'] {
+  --ifm-color-primary: #9d6bf2;
+  --ifm-color-primary-dark: #8d60da;
+  --ifm-color-primary-darker: #855bce;
+  --ifm-color-primary-darkest: #6e4ba9;
+  --ifm-color-primary-light: #ad76ff;
+  --ifm-color-primary-lighter: #b57bff;
+  --ifm-color-primary-lightest: #cc8bff;
+  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.3);
+}
+
+.navbar__logo img {
+  height: 70% !important;
+  margin-top: 0.25rem !important;
+}
+
+// Mirrors the homepage hero gradient, which runs darkest -> primary top to
+// bottom. Reversed here so the page is dark at both outer edges.
+.footer {
+  background: linear-gradient(
+    180deg,
+    var(--ifm-color-primary) 0%,
+    var(--ifm-color-primary-darkest) 100%
+  ) !important;
+  color: #fff !important;
+}
+
+// The footer carries a single centered icon row instead of link columns.
+.footer__links {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 0.5rem;
+}
+
+.footer-icons {
+  display: flex;
+  gap: 1.75rem;
+  align-items: center;
+  justify-content: center;
+
+  a {
+    display: inline-flex;
+    align-items: center;
+    color: #fff;
+    opacity: 0.75;
+    transition: opacity 200ms ease;
+
+    &:hover {
+      opacity: 1;
+    }
+  }
+
+  img {
+    display: block;
+    height: 22px;
+    width: auto;
+  }
+}
+
+// Provenance line from the project README. The copyright below already names
+// SenLab d.o.o., so the "by SenLab d.o.o." tail is dropped here.
+.footer-provenance {
+  margin-top: 1.15rem;
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.82);
+
+  a {
+    color: #fff;
+    text-decoration: underline;
+
+    &:hover {
+      color: #fff;
+      opacity: 0.8;
+    }
+  }
+}
+
+.footer-legal {
+  margin-top: 0.4rem;
+
+  // Inherited --ifm-link-color is the brand purple, which vanishes against
+  // the dark purple footer.
+  a {
+    color: #fff;
+    text-decoration: underline;
+
+    &:hover {
+      color: #fff;
+      opacity: 0.8;
+    }
+  }
+}
+
+.img_ev3q {
+  max-height: 500px;
+  width: auto;
+  display: block;
+  margin: 0 auto;
+}
+
+.sandbox-hero-text,
+.hero__subtitle {
+  text-align: center;
+}
+
+// Justify prose only. `.markdown` wraps rendered page content, so this keeps
+// the ToC, sidebar, navbar, pagination, and footer lists at their default
+// alignment.
+.markdown {
+  p,
+  li {
+    text-align: justify;
+  }
+}
+
+html::-webkit-scrollbar {
+  display: none;
+}
+
+html {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.tabs__item {
+  max-height: 3rem !important;
+}
+
+// GitHub navbar entry renders as the mark alone. A mask filled with
+// currentColor follows the active theme, so no dark-mode invert is needed.
+.navbar-github-link {
+  display: flex;
+  align-items: center;
+
+  &::before {
+    content: '';
+    width: 22px;
+    height: 22px;
+    background-color: currentColor;
+    mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z'/%3E%3C/svg%3E");
+    mask-repeat: no-repeat;
+    mask-position: center;
+    mask-size: contain;
+  }
+
+  &:hover::before {
+    opacity: 0.75;
+  }
+}
+
+// Cards shared by the Sovereignty and Community sections of the landing page.
+// Global rather than per-module so the two sections stay identical.
+.home-card {
+  display: block;
+  height: 100%;
+  padding: 1.25rem 1.35rem;
+  border: 1px solid var(--ifm-color-emphasis-300);
+  border-radius: var(--ifm-global-radius);
+  color: inherit;
+  text-align: left;
+}
+
+a.home-card {
+  transition: border-color 200ms ease, transform 200ms ease;
+
+  &:hover {
+    border-color: var(--ifm-color-primary);
+    text-decoration: none;
+    transform: translateY(-2px);
+  }
+}
+
+.home-card__label {
+  // Community renders these as spans inside a Link, so they need to be blocks
+  // to break onto their own line.
+  display: block;
+  margin-bottom: 0.4rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--ifm-color-primary);
+}
+
+.home-card__body {
+  display: block;
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.55;
+  color: var(--ifm-color-emphasis-700);
+  text-align: left;
+}

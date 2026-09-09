@@ -1,0 +1,98 @@
+/* Sits inside the purple hero band, so labels and prose are keyed to white.
+   The code panes keep their own Prism background and read as cards on it. */
+.equation {
+  margin: 2.5rem 0 2rem;
+  /* The hero centers its text; code must not inherit that. */
+  text-align: left;
+}
+
+.inner {
+  max-width: 1140px;
+  margin: 0 auto;
+  padding: 0 1rem;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr auto 1fr;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.pane {
+  min-width: 0;
+}
+
+.paneLabel {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.4rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.paneFile {
+  font-family: var(--ifm-font-family-monospace);
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  color: rgba(255, 255, 255, 0.62);
+}
+
+.pane :global(.theme-code-block) {
+  margin-bottom: 0;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.22);
+}
+
+.pane :global(pre) {
+  font-size: 0.72rem;
+  line-height: 1.5;
+}
+
+/* The observedAt filter chain is longer than a third-width pane. Wrapping keeps
+   it readable instead of parking it behind a horizontal scrollbar. */
+.pane :global(pre code) {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.operator {
+  font-size: 1.75rem;
+  font-weight: 300;
+  color: rgba(255, 255, 255, 0.85);
+  user-select: none;
+  text-align: center;
+}
+
+.credit {
+  margin: 1.5rem auto 0;
+  max-width: 44rem;
+  text-align: center;
+  font-size: 0.82rem;
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.credit a {
+  color: #fff;
+  text-decoration: underline;
+}
+
+.credit a:hover {
+  color: #fff;
+  opacity: 0.8;
+}
+
+@media screen and (max-width: 996px) {
+  .row {
+    grid-template-columns: 1fr;
+  }
+
+  .operator {
+    font-size: 1.5rem;
+  }
+}
