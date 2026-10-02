@@ -93,7 +93,7 @@ The country mapping also parses `population`, `gdp`, and `area_sq_km` as numbers
 
 ## Write the mappings
 
-Each source has a mapping, and each mapping carries the same multilingual `name` block. [subregion.json5](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/10-json-relationships/subregion.json5) is the smallest mapping that shows a relationship:
+Each source has a mapping, and each mapping carries the same multilingual `name` block. [subregion.json5](https://github.com/vela-tools/cassiopeia-examples/blob/v1.0.3/examples/10-json-relationships/subregion.json5) is the smallest mapping that shows a relationship:
 
 ```json5
 {
@@ -145,7 +145,7 @@ Each source has a mapping, and each mapping carries the same multilingual `name`
 }
 ```
 
-[country.json5](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/10-json-relationships/country.json5) adds the two relationships and richer shapes, while [region.json5](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/10-json-relationships/region.json5) and [state.json5](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/10-json-relationships/state.json5) complete the set. The `get` filter reads the hyphenated `pt-BR` and `zh-CN` tags and returns nothing for a missing translation, so the smaller subregion records still map cleanly.
+[country.json5](https://github.com/vela-tools/cassiopeia-examples/blob/v1.0.3/examples/10-json-relationships/country.json5) adds the two relationships and richer shapes, while [region.json5](https://github.com/vela-tools/cassiopeia-examples/blob/v1.0.3/examples/10-json-relationships/region.json5) and [state.json5](https://github.com/vela-tools/cassiopeia-examples/blob/v1.0.3/examples/10-json-relationships/state.json5) complete the set. The `get` filter reads the hyphenated `pt-BR` and `zh-CN` tags and returns nothing for a missing translation, so the smaller subregion records still map cleanly.
 
 ## Write the manifest
 
@@ -198,7 +198,7 @@ docker run --rm \
     --user "$(id -u):$(id -g)" \
     --volume "$PWD:/data" \
     --workdir /data \
-    ghcr.io/vela-tools/cassiopeia:latest \
+    ghcr.io/vela-tools/cassiopeia:v1.0.3 \
     map \
     --manifest manifest.json5
 ```

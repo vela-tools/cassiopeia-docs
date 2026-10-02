@@ -130,7 +130,7 @@ rawParameters: {
 
 ## Write the mapping
 
-The complete mapping is in [alert.json5](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/25-geojson-json-property/alert.json5). Scalar alert fields become ordinary Properties, the two timestamps use `datetime`, the feature polygon passes through as a `GeoProperty`, and `parameters` becomes the `JsonProperty`:
+The complete mapping is in [alert.json5](https://github.com/vela-tools/cassiopeia-examples/blob/v1.1.0/examples/25-geojson-json-property/alert.json5). Scalar alert fields become ordinary Properties, the two timestamps use `datetime`, the feature polygon passes through as a `GeoProperty`, and `parameters` becomes the `JsonProperty`:
 
 ```json5
 {
@@ -214,7 +214,7 @@ docker run --rm \
     --user "$(id -u):$(id -g)" \
     --volume "$PWD:/data" \
     --workdir /data \
-    ghcr.io/vela-tools/cassiopeia:latest \
+    ghcr.io/vela-tools/cassiopeia:v1.1.0 \
     map \
     --input data/alerts.json \
     --mapping alert.json5 \

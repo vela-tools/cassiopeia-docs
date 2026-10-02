@@ -25,11 +25,12 @@ This is the third custom-model example. The [data-model guide](../../guides/data
 
 ```bash
 curl -sS --fail --retry 3 --retry-delay 5 --retry-all-errors "https://overpass-api.de/api/interpreter" \
+    --user-agent "cassiopeia-examples (+https://github.com/vela-tools/cassiopeia-examples)" \
     --data-urlencode 'data=[out:csv(::type,::id,::lat,::lon,amenity,name)][timeout:180];area["ISO3166-1"="SI"][admin_level=2]->.si;nwr[amenity~"^(charging_station|bicycle_rental|bicycle_parking|car_sharing|fuel|taxi)$"](area.si);out center;' \
     -o data/amenities.csv
 ```
 
-The result is tab-separated and contains a few thousand rows, although the count changes as the map is edited. Replace the `ISO3166-1` value with another country code to search a different country.
+The `--user-agent` line matters: the main Overpass instance answers `406 Not Acceptable` to curl's default User-Agent, so the request says what it is and where it comes from. Put your own project there when you adapt the query. The result is tab-separated and contains a few thousand rows, although the count changes as the map is edited. Replace the `ISO3166-1` value with another country code to search a different country.
 
 ## The record shape
 
@@ -60,7 +61,7 @@ No `transformation` is needed because the resolved source is already an IRI. `Vo
 
 ## Write the mapping
 
-The complete mapping is in [amenity.json5](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/26-csv-vocab-property/amenity.json5):
+The complete mapping is in [amenity.json5](https://github.com/vela-tools/cassiopeia-examples/blob/v1.1.0/examples/26-csv-vocab-property/amenity.json5):
 
 ```json5
 {
@@ -111,7 +112,7 @@ docker run --rm \
     --user "$(id -u):$(id -g)" \
     --volume "$PWD:/data" \
     --workdir /data \
-    ghcr.io/vela-tools/cassiopeia:latest \
+    ghcr.io/vela-tools/cassiopeia:v1.1.0 \
     map \
     --input data/amenities.csv \
     --mapping amenity.json5 \

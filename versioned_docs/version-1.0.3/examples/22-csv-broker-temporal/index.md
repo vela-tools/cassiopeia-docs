@@ -35,7 +35,7 @@ AL122005,            KATRINA,     34,
 20050828, 1800,  , HU, 26.3N,  89.6W, 145,  902, ...
 ```
 
-The file has no single header for all rows, so the generic CSV ingestor cannot read it directly. The example includes a small **preprocessing script**, [flatten.awk](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/22-csv-broker-temporal/flatten.awk), which copies each storm's ID and name onto its track rows and separates the packed date and time. Run it once:
+The file has no single header for all rows, so the generic CSV ingestor cannot read it directly. The example includes a small **preprocessing script**, [flatten.awk](https://github.com/vela-tools/cassiopeia-examples/blob/v1.0.3/examples/22-csv-broker-temporal/flatten.awk), which copies each storm's ID and name onto its track rows and separates the packed date and time. Run it once:
 
 ```bash
 awk -f flatten.awk data/hurdat2-atlantic.txt > data/cyclones.csv
@@ -171,7 +171,7 @@ location: {
 },
 ```
 
-`23.1N`/`75.1W` becomes `[-75.1, 23.1]`. The `dms_point` function from [example 13](../13-json-synthetic-entities/index.md) is not suitable because these values are signed decimals, not degrees-minutes-seconds strings. The complete mapping is in [cyclone.json5](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/22-csv-broker-temporal/cyclone.json5). `TropicalCyclone` is a custom type with a hand-authored context, so this run has no schema validation, as in [example 20](../20-csv-at-context/index.md).
+`23.1N`/`75.1W` becomes `[-75.1, 23.1]`. The `dms_point` function from [example 13](../13-json-synthetic-entities/index.md) is not suitable because these values are signed decimals, not degrees-minutes-seconds strings. The complete mapping is in [cyclone.json5](https://github.com/vela-tools/cassiopeia-examples/blob/v1.0.3/examples/22-csv-broker-temporal/cyclone.json5). `TropicalCyclone` is a custom type with a hand-authored context, so this run has no schema validation, as in [example 20](../20-csv-at-context/index.md).
 
 ## See both shapes as a file first
 
@@ -190,7 +190,7 @@ docker run --rm \
     --network host \
     --volume "$PWD:/data" \
     --workdir /data \
-    ghcr.io/vela-tools/cassiopeia:latest \
+    ghcr.io/vela-tools/cassiopeia:v1.0.3 \
     map \
     --manifest manifest.json5
 ```
@@ -352,7 +352,7 @@ In the series result, `name` stays a single static value. Each temporal attribut
 
 ## Send it to a broker
 
-The [manifest](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/22-csv-broker-temporal/manifest.json5) sends the same run to a Context Broker instead of a directory:
+The [manifest](https://github.com/vela-tools/cassiopeia-examples/blob/v1.0.3/examples/22-csv-broker-temporal/manifest.json5) sends the same run to a Context Broker instead of a directory:
 
 ```json5
 output: {
@@ -367,11 +367,11 @@ output: {
 },
 ```
 
-`operation: "temporal"` selects the `/ngsi-ld/v1/temporal/entities` endpoint (clause 5.6.11). With the temporal representation set to `series`, Cassiopeia folds each storm before delivery, so one request carries its complete track. A folded EntityTemporal belongs only at that endpoint, so this pairing is required; a `series` representation with any other broker operation is rejected. `TropicalCyclone` is a custom model, so the hand-authored [cyclone-context.jsonld](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/22-csv-broker-temporal/cyclone-context.jsonld) travels in each entity body (`contextDelivery: "body"`, `application/ld+json`). A `Link` header would instead require a context URL the broker can fetch.
+`operation: "temporal"` selects the `/ngsi-ld/v1/temporal/entities` endpoint (clause 5.6.11). With the temporal representation set to `series`, Cassiopeia folds each storm before delivery, so one request carries its complete track. A folded EntityTemporal belongs only at that endpoint, so this pairing is required; a `series` representation with any other broker operation is rejected. `TropicalCyclone` is a custom model, so the hand-authored [cyclone-context.jsonld](https://github.com/vela-tools/cassiopeia-examples/blob/v1.0.3/examples/22-csv-broker-temporal/cyclone-context.jsonld) travels in each entity body (`contextDelivery: "body"`, `application/ld+json`). A `Link` header would instead require a context URL the broker can fetch.
 
 ## Run it against Scorpio
 
-The [docker-compose.yml](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/22-csv-broker-temporal/docker-compose.yml) starts [Scorpio](https://github.com/ScorpioBroker/ScorpioBroker), an open-source NGSI-LD broker backed by PostGIS. It serves the API on port 9090. Start it and wait for it to become healthy:
+The [docker-compose.yml](https://github.com/vela-tools/cassiopeia-examples/blob/v1.0.3/examples/22-csv-broker-temporal/docker-compose.yml) starts [Scorpio](https://github.com/ScorpioBroker/ScorpioBroker), an open-source NGSI-LD broker backed by PostGIS. It serves the API on port 9090. Start it and wait for it to become healthy:
 
 ```bash
 docker compose up -d

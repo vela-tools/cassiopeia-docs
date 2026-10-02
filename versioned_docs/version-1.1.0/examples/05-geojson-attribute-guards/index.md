@@ -76,7 +76,7 @@ The guard has two parts. `properties.STELLPL_ANZ and ...` checks that the field 
 
 ## Write the mapping
 
-The full mapping is in [parking.json5](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/05-geojson-attribute-guards/parking.json5). It starts from the Smart Data Model example, changes `category` to a two-entry array, and adds `requiredPermit` and `totalSpotNumber`:
+The full mapping is in [parking.json5](https://github.com/vela-tools/cassiopeia-examples/blob/v1.1.0/examples/05-geojson-attribute-guards/parking.json5). It starts from the Smart Data Model example, changes `category` to a two-entry array, and adds `requiredPermit` and `totalSpotNumber`:
 
 ```json5
 {
@@ -190,7 +190,7 @@ docker run --rm \
     --volume "$PWD:/data" \
     --volume "$HOME/.cache/cassiopeia-examples/schemas:/var/lib/cassiopeia/schemas" \
     --workdir /data \
-    ghcr.io/vela-tools/cassiopeia:latest \
+    ghcr.io/vela-tools/cassiopeia:v1.1.0 \
     map \
     --input data/parking.json \
     --mapping parking.json5 \

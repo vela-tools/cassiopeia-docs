@@ -82,7 +82,7 @@ The dotted form still works for keys without hyphens, so only the region-qualifi
 
 ## Write the mapping
 
-The full mapping is in [region.json5](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/08-json-language-property/region.json5):
+The full mapping is in [region.json5](https://github.com/vela-tools/cassiopeia-examples/blob/v1.1.0/examples/08-json-language-property/region.json5):
 
 ```json5
 {
@@ -156,7 +156,7 @@ docker run --rm \
     --user "$(id -u):$(id -g)" \
     --volume "$PWD:/data" \
     --workdir /data \
-    ghcr.io/vela-tools/cassiopeia:latest \
+    ghcr.io/vela-tools/cassiopeia:v1.1.0 \
     map \
     --input data/regions.json \
     --mapping region.json5 \

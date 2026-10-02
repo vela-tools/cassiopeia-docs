@@ -160,7 +160,7 @@ centroid: {
 
 ## Write the mapping
 
-The complete mapping is in [region.json5](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/31-geojson-geometry-conversion/region.json5):
+The complete mapping is in [region.json5](https://github.com/vela-tools/cassiopeia-examples/blob/v1.0.3/examples/31-geojson-geometry-conversion/region.json5):
 
 ```json5
 {
@@ -222,7 +222,7 @@ docker run --rm \
     --user "$(id -u):$(id -g)" \
     --volume "$PWD:/data" \
     --workdir /data \
-    ghcr.io/vela-tools/cassiopeia:latest \
+    ghcr.io/vela-tools/cassiopeia:v1.0.3 \
     map \
     --input data/regions.geojson \
     --mapping region.json5 \

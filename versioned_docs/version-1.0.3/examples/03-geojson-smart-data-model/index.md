@@ -69,7 +69,7 @@ The `dataModel.Parking` qualifier tells Cassiopeia where to find `OffStreetParki
 
 ## Write the mapping
 
-The full mapping is in [parking.json5](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/03-geojson-smart-data-model/parking.json5). It maps the street and house number, description, opening hours, and coordinates directly, without conditional logic.
+The full mapping is in [parking.json5](https://github.com/vela-tools/cassiopeia-examples/blob/v1.0.3/examples/03-geojson-smart-data-model/parking.json5). It maps the street and house number, description, opening hours, and coordinates directly, without conditional logic.
 
 ```json5
 {
@@ -174,7 +174,7 @@ docker run --rm \
     --volume "$PWD:/data" \
     --volume "$HOME/.cache/cassiopeia-examples/schemas:/var/lib/cassiopeia/schemas" \
     --workdir /data \
-    ghcr.io/vela-tools/cassiopeia:latest \
+    ghcr.io/vela-tools/cassiopeia:v1.0.3 \
     map \
     --input data/parking.json \
     --mapping parking.json5 \

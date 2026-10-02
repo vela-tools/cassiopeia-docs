@@ -70,7 +70,7 @@ With an `observedAt` present, each row is an observation of `urn:ngsi-ld:GoldPri
 
 ## Write the mapping
 
-The full mapping is in [gold.json5](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/07-csv-observed-at/gold.json5). `GoldPriceObserved` is a plain type name, so this run does not validate against a schema.
+The full mapping is in [gold.json5](https://github.com/vela-tools/cassiopeia-examples/blob/v1.1.0/examples/07-csv-observed-at/gold.json5). `GoldPriceObserved` is a plain type name, so this run does not validate against a schema.
 
 ```json5
 {
@@ -116,7 +116,7 @@ docker run --rm \
     --user "$(id -u):$(id -g)" \
     --volume "$PWD:/data" \
     --workdir /data \
-    ghcr.io/vela-tools/cassiopeia:latest \
+    ghcr.io/vela-tools/cassiopeia:v1.1.0 \
     map \
     --input data/gold.csv \
     --mapping gold.json5 \

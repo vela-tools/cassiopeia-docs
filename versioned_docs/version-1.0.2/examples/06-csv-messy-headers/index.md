@@ -62,7 +62,7 @@ Cassiopeia preserves headers as written, so the text inside the brackets must ma
 
 ## Write the mapping
 
-The full mapping is in [precipitation.json5](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/06-csv-messy-headers/precipitation.json5). It uses year and month for identity, parses the year, month, and counts as integers, and parses the millimetre readings as floats. `MonthlyPrecipitationObserved` is a custom type name, so there is no published schema to validate against.
+The full mapping is in [precipitation.json5](https://github.com/vela-tools/cassiopeia-examples/blob/v1.0.2/examples/06-csv-messy-headers/precipitation.json5). It uses year and month for identity, parses the year, month, and counts as integers, and parses the millimetre readings as floats. `MonthlyPrecipitationObserved` is a custom type name, so there is no published schema to validate against.
 
 ```json5
 {
@@ -137,7 +137,7 @@ docker run --rm \
     --user "$(id -u):$(id -g)" \
     --volume "$PWD:/data" \
     --workdir /data \
-    ghcr.io/vela-tools/cassiopeia:latest \
+    ghcr.io/vela-tools/cassiopeia:v1.0.2 \
     map \
     --input data/precipitation.csv \
     --mapping precipitation.json5 \

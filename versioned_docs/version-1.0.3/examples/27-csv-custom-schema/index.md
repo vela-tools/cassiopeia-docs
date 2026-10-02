@@ -49,13 +49,13 @@ hostStar: {
 },
 ```
 
-Unlike [example 20](../20-csv-at-context/index.md#the-synthetic-host-star), which creates the star with a `syntheticEntity`, this run reads stars from their own dataset. The relationship supplies only the target URN; the second input creates the `Star` entity with that ID. Both mappings use `hostname` for the ID, so `HD 330075` becomes `urn:ngsi-ld:Star:HD330075` on both sides. The mappings are in [planet.json5](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/27-csv-custom-schema/planet.json5) and [star.json5](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/27-csv-custom-schema/star.json5).
+Unlike [example 20](../20-csv-at-context/index.md#the-synthetic-host-star), which creates the star with a `syntheticEntity`, this run reads stars from their own dataset. The relationship supplies only the target URN; the second input creates the `Star` entity with that ID. Both mappings use `hostname` for the ID, so `HD 330075` becomes `urn:ngsi-ld:Star:HD330075` on both sides. The mappings are in [planet.json5](https://github.com/vela-tools/cassiopeia-examples/blob/v1.0.3/examples/27-csv-custom-schema/planet.json5) and [star.json5](https://github.com/vela-tools/cassiopeia-examples/blob/v1.0.3/examples/27-csv-custom-schema/star.json5).
 
 ## Author the schemas
 
 Cassiopeia checks each NGSI-LD entity against the JSON Schema for its type. By default it validates the **simplified (key-values)** representation used by Smart Data Model schemas. The schema sees `mass` as the number `131.0`, not as the normalized Property wrapper with its `type` and `value` members. Each model has its own schema file.
 
-[exoplanet.schema.json](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/27-csv-custom-schema/exoplanet.schema.json) constrains the planet:
+[exoplanet.schema.json](https://github.com/vela-tools/cassiopeia-examples/blob/v1.0.3/examples/27-csv-custom-schema/exoplanet.schema.json) constrains the planet:
 
 ```json
 {
@@ -83,7 +83,7 @@ Cassiopeia checks each NGSI-LD entity against the JSON Schema for its type. By d
 }
 ```
 
-[star.schema.json](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/27-csv-custom-schema/star.schema.json) constrains the star, with the ranges each quantity actually occupies, a positive temperature, a right ascension in `[0, 360]`, a declination in `[-90, 90]`, a positive distance:
+[star.schema.json](https://github.com/vela-tools/cassiopeia-examples/blob/v1.0.3/examples/27-csv-custom-schema/star.schema.json) constrains the star, with the ranges each quantity actually occupies, a positive temperature, a right ascension in `[0, 360]`, a declination in `[-90, 90]`, a positive distance:
 
 ```json
 {
@@ -173,7 +173,7 @@ docker run --rm \
     --user "$(id -u):$(id -g)" \
     --volume "$PWD:/data" \
     --workdir /data \
-    ghcr.io/vela-tools/cassiopeia:latest \
+    ghcr.io/vela-tools/cassiopeia:v1.0.3 \
     map \
     --manifest manifest.json5
 ```

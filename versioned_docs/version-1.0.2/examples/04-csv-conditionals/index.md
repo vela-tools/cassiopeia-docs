@@ -94,7 +94,7 @@ address: {
 
 ## Write the mapping
 
-The full mapping is in [station.json5](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/04-csv-conditionals/station.json5). Its `dataModel`, `dataModel.Transportation/BikeHireDockingStation`, identifies the published model and lets validation find its schema. The mapping also copies the name, station code, and provider as text, converts capacity to a number, and builds the location from the coordinate pair.
+The full mapping is in [station.json5](https://github.com/vela-tools/cassiopeia-examples/blob/v1.0.2/examples/04-csv-conditionals/station.json5). Its `dataModel`, `dataModel.Transportation/BikeHireDockingStation`, identifies the published model and lets validation find its schema. The mapping also copies the name, station code, and provider as text, converts capacity to a number, and builds the location from the coordinate pair.
 
 ```json5
 {
@@ -194,7 +194,7 @@ docker run --rm \
     --volume "$PWD:/data" \
     --volume "$HOME/.cache/cassiopeia-examples/schemas:/var/lib/cassiopeia/schemas" \
     --workdir /data \
-    ghcr.io/vela-tools/cassiopeia:latest \
+    ghcr.io/vela-tools/cassiopeia:v1.0.2 \
     map \
     --input data/bikemi_stazioni.csv \
     --mapping station.json5 \

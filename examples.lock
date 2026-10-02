@@ -1,7 +1,20 @@
 {
   "repository": "https://github.com/vela-tools/cassiopeia-examples",
-  "ref": "main",
-  "commit": "bca4aea6d2e32030609a189c826a8ac9d6f54f42",
-  "examples": 31,
-  "syncedInto": "1.0.2"
+  "versions": {
+    "1.1.0": {
+      "tag": "v1.1.0",
+      "commit": "9ddb9c6dba9ba235d3c50fc3d4453e4a22abb23a",
+      "examples": 31
+    },
+    "1.0.3": {
+      "tag": "v1.0.3",
+      "commit": "84c323b3bc45a17902f6385e5bf0f110c7054bbd",
+      "examples": 31
+    },
+    "1.0.2": {
+      "tag": "v1.0.2",
+      "commit": "202cf60b02d81ab7f0eea4591c642ab6fbc835a2",
+      "examples": 31
+    }
+  }
 }

@@ -70,7 +70,7 @@ Because the geohash comes from the coordinates rather than a running counter, th
 
 ## Write the mapping
 
-The full mapping is in [city.json5](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/02-json-id-collision/city.json5):
+The full mapping is in [city.json5](https://github.com/vela-tools/cassiopeia-examples/blob/v1.0.2/examples/02-json-id-collision/city.json5):
 
 ```json5
 {
@@ -125,7 +125,7 @@ docker run --rm \
     --user "$(id -u):$(id -g)" \
     --volume "$PWD:/data" \
     --workdir /data \
-    ghcr.io/vela-tools/cassiopeia:latest \
+    ghcr.io/vela-tools/cassiopeia:v1.0.2 \
     map \
     --input data/city.json \
     --mapping city.json5 \

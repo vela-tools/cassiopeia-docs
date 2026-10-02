@@ -82,7 +82,7 @@ The `is string` check comes first because the CSV reader may parse a numeric-loo
 
 ## Write the mappings
 
-Each source has its own mapping. [airport.json5](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/09-csv-manifest/airport.json5) builds the name, two codes, location, and nested address:
+Each source has its own mapping. [airport.json5](https://github.com/vela-tools/cassiopeia-examples/blob/v1.0.2/examples/09-csv-manifest/airport.json5) builds the name, two codes, location, and nested address:
 
 ```json5
 {
@@ -136,7 +136,7 @@ Each source has its own mapping. [airport.json5](https://github.com/vela-tools/c
 }
 ```
 
-[airline.json5](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/09-csv-manifest/airline.json5) is smaller. It maps the name, two codes with their airline-specific patterns, and the callsign, which only needs a guard for missing values:
+[airline.json5](https://github.com/vela-tools/cassiopeia-examples/blob/v1.0.2/examples/09-csv-manifest/airline.json5) is smaller. It maps the name, two codes with their airline-specific patterns, and the callsign, which only needs a guard for missing values:
 
 ```json5
 {
@@ -172,7 +172,7 @@ Each source has its own mapping. [airport.json5](https://github.com/vela-tools/c
 
 ## Write the manifest
 
-A manifest describes the sources, mappings, and output for the whole run, so the command needs no inline options. The full manifest is in [manifest.json5](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/09-csv-manifest/manifest.json5):
+A manifest describes the sources, mappings, and output for the whole run, so the command needs no inline options. The full manifest is in [manifest.json5](https://github.com/vela-tools/cassiopeia-examples/blob/v1.0.2/examples/09-csv-manifest/manifest.json5):
 
 ```json5
 {
@@ -219,7 +219,7 @@ docker run --rm \
     --volume "$PWD:/data" \
     --volume "$HOME/.cache/cassiopeia-examples/schemas:/var/lib/cassiopeia/schemas" \
     --workdir /data \
-    ghcr.io/vela-tools/cassiopeia:latest \
+    ghcr.io/vela-tools/cassiopeia:v1.0.2 \
     map \
     --manifest manifest.json5
 ```

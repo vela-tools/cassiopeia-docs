@@ -100,7 +100,7 @@ A value outside the two matches no branch, the template produces nothing, and th
 
 ## The manifest
 
-Open [manifest.json5](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/16-kmz-folder-namespacing/manifest.json5) for the run, and [park-point-of-interest.json5](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/16-kmz-folder-namespacing/park-point-of-interest.json5) for the full mapping:
+Open [manifest.json5](https://github.com/vela-tools/cassiopeia-examples/blob/v1.0.2/examples/16-kmz-folder-namespacing/manifest.json5) for the run, and [park-point-of-interest.json5](https://github.com/vela-tools/cassiopeia-examples/blob/v1.0.2/examples/16-kmz-folder-namespacing/park-point-of-interest.json5) for the full mapping:
 
 ```json5
 {
@@ -139,7 +139,7 @@ docker run --rm \
     --user "$(id -u):$(id -g)" \
     --volume "$PWD:/data" \
     --workdir /data \
-    ghcr.io/vela-tools/cassiopeia:latest \
+    ghcr.io/vela-tools/cassiopeia:v1.0.2 \
     map \
     --manifest manifest.json5
 ```

@@ -43,7 +43,7 @@ The planet name contains a space, so Cassiopeia cleans it before using it in a U
 
 ## Author the `@context`
 
-An NGSI-LD entity is JSON-LD, and its `@context` maps short terms such as `ExoPlanet` and `orbitalPeriod` to full IRIs. Without that mapping, `orbitalPeriod` has no shared definition; with it, two systems can resolve the same term. Since no published context exists for this model, the example provides [exoplanet-context.jsonld](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/20-csv-at-context/exoplanet-context.jsonld):
+An NGSI-LD entity is JSON-LD, and its `@context` maps short terms such as `ExoPlanet` and `orbitalPeriod` to full IRIs. Without that mapping, `orbitalPeriod` has no shared definition; with it, two systems can resolve the same term. Since no published context exists for this model, the example provides [exoplanet-context.jsonld](https://github.com/vela-tools/cassiopeia-examples/blob/v1.0.2/examples/20-csv-at-context/exoplanet-context.jsonld):
 
 ```json
 {
@@ -68,7 +68,7 @@ Cassiopeia reads the file and inlines its `@context` value into every emitted en
 
 ## Write the mapping
 
-The complete mapping is in [planet.json5](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/20-csv-at-context/planet.json5). It uses the bare model name `ExoPlanet`, reads one column for each attribute, and types the copied values. Three details are useful to examine: blank cells, the host star created alongside each planet, and unit handling.
+The complete mapping is in [planet.json5](https://github.com/vela-tools/cassiopeia-examples/blob/v1.0.2/examples/20-csv-at-context/planet.json5). It uses the bare model name `ExoPlanet`, reads one column for each attribute, and types the copied values. Three details are useful to examine: blank cells, the host star created alongside each planet, and unit handling.
 
 The empty cells need **no guard**. A blank column resolves to null, and a numeric transformation drops the resulting attribute, so the entity is written without that field. This differs from the [parking example](../05-geojson-attribute-guards/index.md#drop-an-attribute-when-the-source-is-invalid), where a guard rejects the real value `-1` because the model disallows it. Here only absence needs handling. In particular, `eccentricity` can legitimately be `0`; a truthiness test such as `{% if pl_orbeccen %}` would treat that value as false and discard circular orbits. Leaving it unguarded preserves zero while still dropping blanks.
 
@@ -169,7 +169,7 @@ docker run --rm \
     --user "$(id -u):$(id -g)" \
     --volume "$PWD:/data" \
     --workdir /data \
-    ghcr.io/vela-tools/cassiopeia:latest \
+    ghcr.io/vela-tools/cassiopeia:v1.0.2 \
     map \
     --input data/planets.csv \
     --mapping planet.json5 \

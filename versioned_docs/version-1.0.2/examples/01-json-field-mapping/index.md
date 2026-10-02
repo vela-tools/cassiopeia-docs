@@ -24,7 +24,7 @@ curl --fail --location \
     https://raw.githubusercontent.com/andrejewski/periodic-table/master/data.json
 ```
 
-The dataset is not stored in this repository, and `data` is ignored by git. The runner downloads it from the same URL, which [example.toml](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/01-json-field-mapping/example.toml) records along with the publisher and the licence.
+The dataset is not stored in this repository, and `data` is ignored by git. The runner downloads it from the same URL, which [example.toml](https://github.com/vela-tools/cassiopeia-examples/blob/v1.0.2/examples/01-json-field-mapping/example.toml) records along with the publisher and the licence.
 
 ## The record shape
 
@@ -56,7 +56,7 @@ Cassiopeia combines the name with the `ChemicalElement` model to produce an ID s
 
 ## Write the mapping
 
-Open [element.json5](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/01-json-field-mapping/element.json5) for the full mapping:
+Open [element.json5](https://github.com/vela-tools/cassiopeia-examples/blob/v1.0.2/examples/01-json-field-mapping/element.json5) for the full mapping:
 
 ```json5
 {
@@ -115,7 +115,7 @@ docker run --rm \
     --user "$(id -u):$(id -g)" \
     --volume "$PWD:/data" \
     --workdir /data \
-    ghcr.io/vela-tools/cassiopeia:latest \
+    ghcr.io/vela-tools/cassiopeia:v1.0.2 \
     map \
     --input data/element.json \
     --mapping element.json5 \

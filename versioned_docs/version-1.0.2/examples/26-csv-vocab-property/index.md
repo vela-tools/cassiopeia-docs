@@ -60,7 +60,7 @@ No `transformation` is needed because the resolved source is already an IRI. `Vo
 
 ## Write the mapping
 
-The complete mapping is in [amenity.json5](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/26-csv-vocab-property/amenity.json5):
+The complete mapping is in [amenity.json5](https://github.com/vela-tools/cassiopeia-examples/blob/v1.0.2/examples/26-csv-vocab-property/amenity.json5):
 
 ```json5
 {
@@ -111,7 +111,7 @@ docker run --rm \
     --user "$(id -u):$(id -g)" \
     --volume "$PWD:/data" \
     --workdir /data \
-    ghcr.io/vela-tools/cassiopeia:latest \
+    ghcr.io/vela-tools/cassiopeia:v1.0.2 \
     map \
     --input data/amenities.csv \
     --mapping amenity.json5 \

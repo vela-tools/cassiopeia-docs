@@ -2,7 +2,7 @@
 title: "Worked examples"
 sidebar_label: "Overview"
 sidebar_position: 0
-description: "Thirty-one real public datasets mapped to NGSI-LD end to end, each example adding one idea to the ones before it."
+description: "Real public datasets mapped to NGSI-LD end to end, each example adding one idea to the ones before it."
 keywords: ["NGSI-LD", "worked example", "Smart Data Models", "data transformation"]
 ---
 
