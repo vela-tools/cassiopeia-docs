@@ -125,9 +125,10 @@ const config: Config = {
   organizationName: 'vela-tools', // Usually your GitHub org/user name.
   projectName: 'cassiopeia', // Usually your repo name.
 
-  // The example pages live in vela-tools/cassiopeia-examples and are linked
-  // absolutely, so every link a doc page carries is either internal and
-  // resolvable or external. A broken internal link is a bug, not a pending sync.
+  // The example pages are synced into each version from the examples tag of the
+  // same name (tools/sync-examples.mjs), so a link into them is internal and
+  // checked like any other. A version without that tag has no example pages,
+  // and a guide in it that links to them fails here rather than at a reader.
   onBrokenLinks: 'throw',
 
   // Even if you don't use internationalization, you can use this field to set

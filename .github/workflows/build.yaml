@@ -33,11 +33,11 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
       # The example pages under versioned_docs are copies; the examples
-      # repository owns them. This re-runs the sync against the commit
-      # examples.lock pins and fails if the result differs, which catches a page
-      # edited here instead of at the source. Pinned rather than tracking main,
-      # so an unrelated pull request does not fail because the examples
-      # repository moved overnight.
+      # repository owns them. This re-runs the sync against the commits
+      # examples.lock pins, one per version, and fails if the result differs,
+      # which catches a page edited here instead of at the source. Pinned rather
+      # than resolving the tags again, so an unrelated pull request does not fail
+      # because a tag was pushed to the examples repository overnight.
       - name: Check the synced example pages
         run: npm run sync:examples:check -- --locked
 

@@ -55,7 +55,7 @@ npm run serve                                  # serve the built output
 
 The site is versioned only. There is no current `docs/` directory, and `includeCurrentVersion` is off, so an edit goes straight into `versioned_docs/version-<v>` and its sidebar lives in `versioned_sidebars/version-<v>-sidebars.json`. The newest entry in `versions.json` is the default and is served at `/docs`, without a version in the path.
 
-To cut a release, copy the newest version directory and its sidebar, add the version to `versions.json`, and name it in the `versions` map in `docusaurus.config.ts`. `docusaurus docs:version` needs a current version and will not work here.
+To cut a release, copy the newest version directory and its sidebar, add the version to `versions.json`, and name it in the `versions` map in `docusaurus.config.ts`. `docusaurus docs:version` needs a current version and will not work here. Then run `npm run sync:examples`, which gives the new version the examples tagged for it, or none until that tag exists.
 
 ```
 versioned_docs/version-1.1.0/
@@ -69,7 +69,15 @@ versioned_docs/version-1.1.0/
 
 ## Where the examples are
 
-The worked examples are not in this repository. Each one is a directory in [vela-tools/cassiopeia-examples](https://github.com/vela-tools/cassiopeia-examples) holding a real public dataset's mapping, the commands, and the page that explains them, checked by a runner that executes the commands and compares the output against what the page claims. The guides link to those pages absolutely.
+The worked examples are written in [vela-tools/cassiopeia-examples](https://github.com/vela-tools/cassiopeia-examples). Each one is a directory there holding a real public dataset's mapping, the commands, and the page that explains them, checked by a runner that executes the commands and compares the output against what the page claims.
+
+The pages under `versioned_docs/version-<v>/examples` are copies, and `npm run sync:examples` writes them. Each version takes its pages from the examples tag of the same name, `v1.0.3` for version 1.0.3, because that repository names a tag after the Cassiopeia release its examples were run against. A version with no such tag has no example pages, and its guides must not link to them. `examples.lock` records the commit each version came from, and the build fails when a copy no longer matches it, so a page is edited in the examples repository and never here.
+
+```bash
+npm run sync:examples                                       # every version, from its tag on GitHub
+npm run sync:examples -- --source ../cassiopeia-examples    # the same, from a local checkout's tags
+npm run sync:examples:check -- --locked                     # what CI runs: do the copies match the lock?
+```
 
 ## Contributing
 

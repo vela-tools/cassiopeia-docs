@@ -1,22 +1,25 @@
 #!/usr/bin/env node
-// Sync the worked example pages from vela-tools/cassiopeia-examples into the
-// newest documentation version.
+// Sync the worked example pages from vela-tools/cassiopeia-examples into every
+// documentation version.
 //
 // The examples repository owns the prose: a page there is checked against the
 // commands its descriptor declares, so it is the only copy that can be trusted.
 // This script takes those pages, rewrites the links that only resolve on
-// GitHub, and writes them into versioned_docs/version-<newest>/examples so the
-// site can carry them with a sidebar, search, and the same metadata every other
-// page has.
+// GitHub, and writes them into versioned_docs/version-<v>/examples so the site
+// can carry them with a sidebar, search, and the same metadata every other page
+// has.
 //
-// Only the newest version is ever touched. An archived version keeps the
-// examples it shipped with, which is what "documentation version N documents
-// engine N" means in practice.
+// Each version is synced from the examples tag of the same name: version 1.0.3
+// from tag v1.0.3. The examples repository names a tag after the Cassiopeia
+// release its examples were run against, so a version's pages show the commands
+// and the output of that release and no other. A version with no matching tag
+// has no example pages at all, which is what a release whose examples never ran
+// on it should show.
 //
-//   node tools/sync-examples.mjs                 # sync main into the newest version
-//   node tools/sync-examples.mjs --ref v1.0.2    # sync a tag instead
-//   node tools/sync-examples.mjs --check         # fail if the tree would change
-//   node tools/sync-examples.mjs --source ../cassiopeia-examples   # skip the clone
+//   node tools/sync-examples.mjs            # sync every version from its tag
+//   node tools/sync-examples.mjs --check    # fail if the tree would change
+//   node tools/sync-examples.mjs --locked   # read the commits examples.lock records instead of the tags
+//   node tools/sync-examples.mjs --source ../../cassiopeia-examples   # clone a local checkout instead of GitHub
 
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -40,16 +43,11 @@ function arg(name, fallback = null) {
 const flag = (name) => process.argv.includes(`--${name}`);
 
 const root = path.resolve(import.meta.dirname, '..');
-const ref = arg('ref', 'main');
 const check = flag('check');
+const locked = flag('locked');
+const lockPath = path.join(root, 'examples.lock');
 
-// The newest entry in versions.json is the version served at /docs, and the
-// only one that still accepts changes.
 const versions = JSON.parse(fs.readFileSync(path.join(root, 'versions.json'), 'utf8'));
-const version = versions[0];
-const versionDir = path.join(root, 'versioned_docs', `version-${version}`);
-const targetDir = path.join(versionDir, 'examples');
-const sidebarPath = path.join(root, 'versioned_sidebars', `version-${version}-sidebars.json`);
 
 // A descriptor is TOML, but only its [example] table is read here and its keys
 // are plain strings and string arrays. Pulling a TOML parser in for that would
@@ -68,7 +66,7 @@ function exampleTable(toml) {
 
 // The three link shapes that mean something different once a page is served
 // from the documentation site rather than from GitHub.
-function rewrite(page, directory, linkRef) {
+function rewrite(page, directory, tag) {
   return (
     page
       // A sibling example is a directory here, not a file.
@@ -79,8 +77,9 @@ function rewrite(page, directory, linkRef) {
       // was synced into.
       .replace(new RegExp(`${SITE_DOCS}/([a-z0-9/-]+)`, 'g'), '../../$1.md')
       // A bare filename is a file that lives only in the examples repository.
+      // It links to the tag, so it shows the file as it stood for this version.
       .replace(/\]\(([a-z0-9_.-]+)\)/g, (whole, file) =>
-        SOURCE_FILE.test(file) ? `](${REPO_WEB}/blob/${linkRef}/examples/${directory}/${file})` : whole)
+        SOURCE_FILE.test(file) ? `](${REPO_WEB}/blob/${tag}/examples/${directory}/${file})` : whole)
   );
 }
 
@@ -100,114 +99,123 @@ function frontMatter({ title, label, summary, formats, models }, position) {
   ].join('\n');
 }
 
+// The overview repeats the reading order the directory prefixes already encode.
+// It names no count, since each version carries the examples its tag holds.
+function overview(entries) {
+  return [
+    '---',
+    'title: "Worked examples"',
+    'sidebar_label: "Overview"',
+    'sidebar_position: 0',
+    'description: "Real public datasets mapped to NGSI-LD end to end, each example adding one idea to the ones before it."',
+    'keywords: ["NGSI-LD", "worked example", "Smart Data Models", "data transformation"]',
+    '---',
+    '',
+    '# Worked examples',
+    '',
+    'Each example maps one real public dataset from beginning to end: where the data comes from, the mapping that shapes it, the command that runs it, and the entities that come out. The order is a reading order, so each one builds on the ones before it.',
+    '',
+    `The mappings, manifests, and schemas themselves live in [${REPO_WEB.replace('https://github.com/', '')}](${REPO_WEB}), where a runner executes every example and checks its output against what its page claims.`,
+    '',
+    ...entries.flatMap(({ directory, label, summary, models }) => [
+      `**[${label}](./${directory}/index.md)**${models.length ? ` → ${models.map((m) => `\`${m}\``).join(' ')}` : ''}`,
+      '',
+      `${summary}`,
+      '',
+    ]),
+  ].join('\n');
+}
+
 // --- source ------------------------------------------------------------------
 
-// --locked syncs whatever commit examples.lock names instead of a moving branch.
-// The drift check in CI uses it: a pull request that touches nothing to do with
-// the examples should not fail because the examples repository moved overnight.
-// Two different refs are in play. `fetchRef` says which commit to read, and is a
-// raw SHA in locked mode so the check is reproducible. `linkRef` is the name that
-// goes into the links back to the source files, and stays a branch or tag so a
-// reader following one lands somewhere durable and the diff of a sync stays small.
-let fetchRef = ref;
-let linkRef = ref;
-if (flag('locked')) {
-  const lock = path.join(root, 'examples.lock');
-  if (!fs.existsSync(lock)) {
-    console.log('no examples.lock yet, nothing to check');
-    process.exit(0);
-  }
-  const locked = JSON.parse(fs.readFileSync(lock, 'utf8'));
-  fetchRef = locked.commit;
-  linkRef = locked.ref;
+// Each resolver answers the tag and commit a version is synced from, or null
+// for a version without examples.
+
+// --locked reads the commits examples.lock records, so the drift check in CI is
+// reproducible: a pull request that touches nothing to do with the examples
+// should not fail because a tag was pushed overnight.
+function lockedSources() {
+  if (!fs.existsSync(lockPath)) throw new Error('examples.lock is missing. Run: npm run sync:examples');
+  const recorded = JSON.parse(fs.readFileSync(lockPath, 'utf8')).versions;
+  if (!recorded) throw new Error('examples.lock records no versions. Run: npm run sync:examples');
+  return (version) => recorded[version] ?? null;
 }
 
-let source = arg('source');
-let temp = null;
-if (!source) {
-  temp = fs.mkdtempSync(path.join(os.tmpdir(), 'cassiopeia-examples-'));
-  if (/^[0-9a-f]{40}$/.test(fetchRef)) {
-    // A commit is not a branch, so it has to be fetched by name rather than cloned.
-    execFileSync('git', ['init', '--quiet', temp]);
-    execFileSync('git', ['-C', temp, 'remote', 'add', 'origin', REPO]);
-    execFileSync('git', ['-C', temp, 'fetch', '--depth', '1', '--quiet', 'origin', fetchRef]);
-    execFileSync('git', ['-C', temp, 'checkout', '--quiet', 'FETCH_HEAD']);
-  } else {
-    execFileSync('git', ['clone', '--depth', '1', '--branch', fetchRef, REPO, temp], { stdio: 'inherit' });
-  }
-  source = temp;
+function taggedSources(clone) {
+  const tags = new Set(execFileSync('git', ['-C', clone, 'tag', '--list'], { encoding: 'utf8' }).split('\n').filter(Boolean));
+  return (version) => {
+    const tag = `v${version}`;
+    if (!tags.has(tag)) return null;
+    const commit = execFileSync('git', ['-C', clone, 'rev-parse', `refs/tags/${tag}^{commit}`], { encoding: 'utf8' }).trim();
+    return { tag, commit };
+  };
 }
-const sha = execFileSync('git', ['-C', source, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
 
+// One clone serves every version, each a checkout of a different commit. A
+// --source checkout is cloned rather than read in place, so its tags resolve
+// exactly as GitHub's would and its working tree is never touched.
+const clone = fs.mkdtempSync(path.join(os.tmpdir(), 'cassiopeia-examples-'));
+execFileSync('git', ['clone', '--quiet', '--no-checkout', arg('source') ? path.resolve(arg('source')) : REPO, clone], { stdio: 'inherit' });
+const sourceFor = locked ? lockedSources() : taggedSources(clone);
 
 // --- render ------------------------------------------------------------------
 
-const dirs = fs
-  .readdirSync(path.join(source, 'examples'), { withFileTypes: true })
-  .filter((entry) => entry.isDirectory() && /^\d{2}-/.test(entry.name))
-  .map((entry) => entry.name)
-  .sort();
-
-if (dirs.length === 0) throw new Error(`no examples found under ${source}/examples`);
-
 const files = new Map();
-const entries = [];
+const lock = { repository: REPO_WEB, versions: {} };
+const report = [];
 
-dirs.forEach((directory, index) => {
-  const descriptor = exampleTable(fs.readFileSync(path.join(source, 'examples', directory, 'example.toml'), 'utf8'));
-  const page = fs.readFileSync(path.join(source, 'examples', directory, 'example.md'), 'utf8');
-  files.set(path.join(targetDir, directory, 'index.md'), frontMatter(descriptor, index + 1) + rewrite(page, directory, linkRef));
-  entries.push({ directory, ...descriptor });
-});
+for (const version of versions) {
+  const targetDir = path.join(root, 'versioned_docs', `version-${version}`, 'examples');
+  const sidebarPath = path.join(root, 'versioned_sidebars', `version-${version}-sidebars.json`);
+  const source = sourceFor(version);
+  const entries = [];
 
-// The index repeats the reading order the directory prefixes already encode.
-const index = [
-  '---',
-  'title: "Worked examples"',
-  'sidebar_label: "Overview"',
-  'sidebar_position: 0',
-  'description: "Thirty-one real public datasets mapped to NGSI-LD end to end, each example adding one idea to the ones before it."',
-  'keywords: ["NGSI-LD", "worked example", "Smart Data Models", "data transformation"]',
-  '---',
-  '',
-  '# Worked examples',
-  '',
-  'Each example maps one real public dataset from beginning to end: where the data comes from, the mapping that shapes it, the command that runs it, and the entities that come out. The order is a reading order, so each one builds on the ones before it.',
-  '',
-  `The mappings, manifests, and schemas themselves live in [${REPO_WEB.replace('https://github.com/', '')}](${REPO_WEB}), where a runner executes every example and checks its output against what its page claims.`,
-  '',
-  ...entries.flatMap(({ directory, label, summary, models }) => [
-    `**[${label}](./${directory}/index.md)**${models.length ? ` → ${models.map((m) => `\`${m}\``).join(' ')}` : ''}`,
-    '',
-    `${summary}`,
-    '',
-  ]),
-].join('\n');
-files.set(path.join(targetDir, 'index.md'), index);
+  if (source) {
+    execFileSync('git', ['-C', clone, '-c', 'advice.detachedHead=false', 'checkout', '--quiet', '--detach', source.commit]);
 
-// --- sidebar -----------------------------------------------------------------
+    const dirs = fs
+      .readdirSync(path.join(clone, 'examples'), { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && /^\d{2}-/.test(entry.name))
+      .map((entry) => entry.name)
+      .sort();
+    if (dirs.length === 0) throw new Error(`no examples found at ${source.tag} (${source.commit})`);
 
-const sidebar = JSON.parse(fs.readFileSync(sidebarPath, 'utf8'));
-const category = {
-  type: 'category',
-  label: 'Examples',
-  link: { type: 'doc', id: 'examples/index' },
-  items: entries.map(({ directory }) => `examples/${directory}/index`),
-};
-const at = sidebar.docs.findIndex((item) => item?.type === 'category' && item.label === 'Examples');
-if (at === -1) sidebar.docs.push(category);
-else sidebar.docs[at] = category;
-files.set(sidebarPath, `${JSON.stringify(sidebar, null, 2)}\n`);
+    dirs.forEach((directory, index) => {
+      const descriptor = exampleTable(fs.readFileSync(path.join(clone, 'examples', directory, 'example.toml'), 'utf8'));
+      const page = fs.readFileSync(path.join(clone, 'examples', directory, 'example.md'), 'utf8');
+      files.set(path.join(targetDir, directory, 'index.md'), frontMatter(descriptor, index + 1) + rewrite(page, directory, source.tag));
+      entries.push({ directory, ...descriptor });
+    });
+    files.set(path.join(targetDir, 'index.md'), overview(entries));
 
-// Provenance, so a reader and a reviewer can both see which commit a page came from.
-files.set(
-  path.join(root, 'examples.lock'),
-  `${JSON.stringify({ repository: REPO_WEB, ref: linkRef, commit: sha, examples: entries.length, syncedInto: version }, null, 2)}\n`,
-);
+    lock.versions[version] = { tag: source.tag, commit: source.commit, examples: entries.length };
+    report.push(`version-${version}: ${entries.length} examples from ${source.tag} (${source.commit.slice(0, 8)})`);
+  } else {
+    report.push(`version-${version}: no v${version} tag, no examples`);
+  }
+
+  // The Examples category is there exactly when the version has examples.
+  const sidebar = JSON.parse(fs.readFileSync(sidebarPath, 'utf8'));
+  const others = sidebar.docs.filter((item) => !(item?.type === 'category' && item.label === 'Examples'));
+  const category = {
+    type: 'category',
+    label: 'Examples',
+    link: { type: 'doc', id: 'examples/index' },
+    items: entries.map(({ directory }) => `examples/${directory}/index`),
+  };
+  sidebar.docs = entries.length ? [...others, category] : others;
+  files.set(sidebarPath, `${JSON.stringify(sidebar, null, 2)}\n`);
+}
+
+// Provenance, so a reader and a reviewer can both see which commit each
+// version's pages came from.
+files.set(lockPath, `${JSON.stringify(lock, null, 2)}\n`);
+
+fs.rmSync(clone, { recursive: true, force: true });
 
 // --- write or check ----------------------------------------------------------
 
-let changed = [];
+const changed = [];
 for (const [file, content] of files) {
   const current = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null;
   if (current === content) continue;
@@ -218,18 +226,22 @@ for (const [file, content] of files) {
   }
 }
 
-// An example deleted upstream has to disappear here too, or the sidebar points
-// at a page the source no longer has.
-if (fs.existsSync(targetDir)) {
-  for (const stale of fs.readdirSync(targetDir).filter((name) => /^\d{2}-/.test(name) && !dirs.includes(name))) {
-    changed.push(path.relative(root, path.join(targetDir, stale)) + ' (removed)');
-    if (!check) fs.rmSync(path.join(targetDir, stale), { recursive: true });
+// An example deleted upstream, or every example of a version without a tag,
+// has to disappear here too, or the sidebar and the overview point at pages the
+// source does not have.
+for (const version of versions) {
+  const targetDir = path.join(root, 'versioned_docs', `version-${version}`, 'examples');
+  if (!fs.existsSync(targetDir)) continue;
+  for (const name of fs.readdirSync(targetDir)) {
+    const entry = path.join(targetDir, name);
+    if (files.has(entry) || files.has(path.join(entry, 'index.md'))) continue;
+    changed.push(`${path.relative(root, entry)} (removed)`);
+    if (!check) fs.rmSync(entry, { recursive: true });
   }
+  if (!check && fs.readdirSync(targetDir).length === 0) fs.rmdirSync(targetDir);
 }
 
-if (temp) fs.rmSync(temp, { recursive: true, force: true });
-
-console.log(`${entries.length} examples from ${fetchRef} (${sha.slice(0, 8)}) -> version-${version}`);
+for (const line of report) console.log(line);
 if (changed.length === 0) console.log('no changes');
 else {
   console.log(`${changed.length} file(s) ${check ? 'would change' : 'written'}:`);
