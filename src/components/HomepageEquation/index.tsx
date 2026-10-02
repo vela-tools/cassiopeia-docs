@@ -18,6 +18,7 @@ const dataset = `<metData>
 </metData>`;
 
 const mapping = `{
+  version: "v4",
   dataModel: "dataModel.Weather/WeatherObserved",
   identity: {
     entityName: "{{ metData.domain_id }}",

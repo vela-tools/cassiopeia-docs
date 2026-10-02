@@ -192,7 +192,7 @@ retry: {
 },
 ~~~
 
-## Examples in the tree
+## Examples
 
 - [Example 9](../examples/09-csv-manifest/index.md) pairs two CSV sources with two mappings in one file-output run.
 - [Example 23](../examples/23-json-scheduling/index.md) polls a live JSON feed every five minutes and upserts to a broker, using `schedule`, `retry`, and `onFailure`.
