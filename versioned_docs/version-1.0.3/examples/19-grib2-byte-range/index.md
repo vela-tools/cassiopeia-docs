@@ -13,8 +13,11 @@ The [GRIB1 example](../18-grib1-derived-values/index.md) handled a regional nowc
 
 By default Cassiopeia decodes GRIB2 through ecCodes, which also handles projected regional grids. A build without the C dependency can use the pure-Rust grib-rs decoder: turn off `grib2-full` with `--no-default-features` and add `--features grib1` if GRIB1 support is also needed. Either decoder works with the regular global grid, and the byte-range download below needs only `curl`.
 
-> [!WARNING]
-> Use a build with ecCodes for this example. ecCodes is enabled by the default `grib2-full` feature. The prebuilt release binaries and other `--no-default-features` builds use the pure-Rust grib-rs reader instead. It works with this regular global grid, but not with every projected grid. See [Getting started](../../guides/getting-started.md#grib1-and-eccodes).
+:::warning
+
+Use a build with ecCodes for this example. ecCodes is enabled by the default `grib2-full` feature. The prebuilt release binaries and other `--no-default-features` builds use the pure-Rust grib-rs reader instead. It works with this regular global grid, but not with every projected grid. See [Getting started](../../guides/getting-started.md#grib1-and-eccodes).
+
+:::
 
 ## Get the data
 

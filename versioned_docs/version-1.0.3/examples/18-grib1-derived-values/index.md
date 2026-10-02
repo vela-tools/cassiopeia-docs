@@ -13,8 +13,11 @@ GRIB stores gridded weather data as one field per parameter. Temperature is in K
 
 It reuses the coordinate-derived `geohash` identity from [keeping same-named entities apart](../02-json-id-collision/index.md) and the `unitCode` qualifier from [units and a timestamped observation](../14-xml-unit-code/index.md).
 
-> [!WARNING]
-> This example decodes GRIB1 and therefore requires ecCodes. The prebuilt release binaries do not include it (`--no-default-features`), so they cannot run this example. Install ecCodes and build from source with the default features, as described in [Getting started](../../guides/getting-started.md#grib1-and-eccodes). ecCodes also provides the `grib_copy` and `grib_ls` tools used below.
+:::warning
+
+This example decodes GRIB1 and therefore requires ecCodes. The prebuilt release binaries do not include it (`--no-default-features`), so they cannot run this example. Install ecCodes and build from source with the default features, as described in [Getting started](../../guides/getting-started.md#grib1-and-eccodes). ecCodes also provides the `grib_copy` and `grib_ls` tools used below.
+
+:::
 
 ## Get the data
 
