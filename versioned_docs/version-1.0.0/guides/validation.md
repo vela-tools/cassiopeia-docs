@@ -72,7 +72,7 @@ The representation used for validation is separate from the representation Cassi
 | `--validation-representation` | `output.validation.representation` | `normalized`, `concise`, `simplified` | The representation entities are validated in. |
 | `--validation-skip-null` | `output.validation.skipNull` | `skip`, `include` | Whether null-valued attributes are present when the entity is checked. |
 
-A command-line flag overrides the manifest, which overrides the simplified default. Change the representation only when the target schema describes another form, such as a schema that constrains the full normalized Property wrapper with its `type` and `value` members. [Example 28](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/28-json-advanced-schema/example.md) validates that form with `representation: "normalized"`. The [representation guide](./representations.md) explains how the writing and validation settings stay independent.
+A command-line flag overrides the manifest, which overrides the simplified default. Change the representation only when the target schema describes another form, such as a schema that constrains the full normalized Property wrapper with its `type` and `value` members. The [representation guide](./representations.md) explains how the writing and validation settings stay independent.
 
 ## Where schemas come from
 
@@ -154,9 +154,9 @@ A downloaded schema is fetched as a single document. Its own relative `$ref`s ar
 
 A custom source is one you expect to exist. Unlike the convention, whose missing schema is a tolerated opt-out handled by the mode, an explicitly requested schema that cannot be loaded because it is absent, unreadable, or unparseable is an error. Under `fail-when-schema` or `fail`, it aborts the run. Under `warn`, Cassiopeia reports it and writes the entity. The distinction is intentional: a convention miss means "this type has no schema, that is fine"; an explicit miss means "the schema you pointed me at is not there", which is a mistake worth surfacing.
 
-## In an example
+## A strict check
 
-[Example 3](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/03-geojson-smart-data-model/example.md) runs a strict check:
+A strict check against a published model looks like this:
 
 ~~~bash
 cassiopeia map \
@@ -169,9 +169,9 @@ cassiopeia map \
     --validation-representation simplified
 ~~~
 
-`--validation-mode fail` aborts the run if any entity does not match the `OffStreetParking` schema, so a clean run proves that every entity conforms. `--validation-representation simplified` checks the key-values form described by the schema. [Example 14](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/14-xml-unit-code/example.md) instead uses the default `fail-when-schema` in its manifest, so its `WeatherObserved` entity is enforced while any schemaless type passes through.
+`--validation-mode fail` aborts the run if any entity does not match the `OffStreetParking` schema, so a clean run proves that every entity conforms. `--validation-representation simplified` checks the key-values form described by the schema. The default `fail-when-schema` instead enforces only the types a schema describes, and lets any schemaless type pass through.
 
-[Example 27](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/27-csv-custom-schema/example.md) takes the other route: an invented `ExoPlanet` model with no catalog schema, validated against a hand-authored schema named by `--validation-schema`. It shows the custom-schema entry point in a complete run. [Example 28](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/28-json-advanced-schema/example.md) goes further by validating the full **normalized** shape, including `unitCode`, `observedAt`, `datasetId`, sub-properties, and the less common NGSI-LD kinds, against a hand-authored schema named by a per-input `schema` in a manifest.
+The other route is a model with no catalog schema, validated against a hand-authored schema named by `--validation-schema`. A hand-authored schema can also check the full **normalized** shape, including `unitCode`, `observedAt`, `datasetId`, sub-properties, and the less common NGSI-LD kinds, when a manifest names it with a per-input `schema`.
 
 ## Next steps
 

@@ -6,7 +6,7 @@ keywords: ["schedule", "cron", "interval", "poller", "timezone", "UTC"]
 ---
 # Scheduling
 
-A schedule makes a run repeat instead of exiting after one pass. It turns a one-off transformation into a poller that fetches a live feed, maps it, writes the entities, waits, and repeats. This keeps a file or context broker current as new data arrives. [Example 23](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/23-json-scheduling/example.md) shows a complete air-quality poller. This page explains trigger behavior, including the timezone rules that are easiest to get wrong.
+A schedule makes a run repeat instead of exiting after one pass. It turns a one-off transformation into a poller that fetches a live feed, maps it, writes the entities, waits, and repeats. This keeps a file or context broker current as new data arrives. This page explains trigger behavior, including the timezone rules that are easiest to get wrong.
 
 Every scheduling setting has two equivalent forms: a field inside a manifest's `schedule` block and a command-line flag on `cassiopeia map`. This page gives both forms. The manifest field table is in the [manifest guide](./manifests.md#schedule).
 
@@ -99,9 +99,9 @@ schedule: {
 
 On the command line, the same policy is `--retry 3 --retry-backoff 15s`. `--retry-backoff` requires `--retry` and defaults to `5s` when omitted. Once retries are exhausted, the top-level `onFailure` decides the outcome. `abort` (the default) stops the schedule and exits non-zero. `continue` logs the failure and waits for the next scheduled run, exiting non-zero when the schedule finishes. `ignore` does the same but exits zero, which suits a long-lived poller that should continue after a transient bad poll. See [Handle failures](./running.md#handle-failures) for the full policy and its exit-status guarantee.
 
-## A worked example
+## A complete schedule
 
-This is the schedule from [Example 23](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/23-json-scheduling/example.md). It polls a live air-quality feed every five minutes and upserts each reading to a broker. Retries handle dropped connections, and a bad poll does not stop the schedule.
+This schedule polls a live air-quality feed every five minutes and upserts each reading to a broker. Retries handle dropped connections, and a bad poll does not stop the schedule.
 
 ~~~json5
 {
@@ -163,7 +163,5 @@ The first poll runs at once. Every five minutes, plus up to 20 seconds of jitter
 
 ## Next steps
 
-- [Examples](https://github.com/vela-tools/cassiopeia-examples#the-examples): apply each idea in these guides to a real dataset.
 - [Manifests](./manifests.md#schedule): see the `schedule` field table.
 - [Running Cassiopeia](./running.md): use the full command-line guide for schedule flags.
-- [Example 23](https://github.com/vela-tools/cassiopeia-examples/blob/main/examples/23-json-scheduling/example.md): follow a live feed polled on a schedule from beginning to end.
