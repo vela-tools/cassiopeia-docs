@@ -58,7 +58,7 @@ The site is versioned only. There is no current `docs/` directory, and `includeC
 To cut a release, copy the newest version directory and its sidebar, add the version to `versions.json`, and name it in the `versions` map in `docusaurus.config.ts`. `docusaurus docs:version` needs a current version and will not work here. Then run `npm run sync:examples`, which gives the new version the examples tagged for it, or none until that tag exists.
 
 ```
-versioned_docs/version-1.1.0/
+versioned_docs/version-1.1.1/
 ├── index.md
 ├── guides/                                    # the reading order, twelve pages
 ├── reference/                                 # CLI, Docker, TUI, architecture, NGSI-LD
