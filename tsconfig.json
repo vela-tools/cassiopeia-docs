@@ -4,8 +4,13 @@
 {
   "extends": "@docusaurus/tsconfig",
   "compilerOptions": {
-    "baseUrl": ".",
-    "ignoreDeprecations": "6.0",
+    // TypeScript 7 removed baseUrl, but @docusaurus/tsconfig still sets it. Reset it here and
+    // declare the alias in this file, since without baseUrl a path resolves against the config
+    // that declares it.
+    "baseUrl": null,
+    "paths": {
+      "@site/*": ["./*"]
+    },
     "strict": true
   },
   "exclude": [".docusaurus", "build"]
