@@ -25,7 +25,7 @@ curl --fail --location --output data/routes.dat https://raw.githubusercontent.co
 cassiopeia sdm download
 ```
 
-The country and aircraft lists repeat some entities, as the [one row per entity](../11-csv-relationship-graph/index.md#one-row-per-entity) section of example 11 explains. Collapse them to one row per entity with the three awk scripts in this directory, [openflights-csv.awk](https://github.com/vela-tools/cassiopeia-examples/blob/v1.1.0/examples/12-csv-list-relationship/openflights-csv.awk), [collapse-countries.awk](https://github.com/vela-tools/cassiopeia-examples/blob/v1.1.0/examples/12-csv-list-relationship/collapse-countries.awk), and [collapse-planes.awk](https://github.com/vela-tools/cassiopeia-examples/blob/v1.1.0/examples/12-csv-list-relationship/collapse-planes.awk):
+The country and aircraft lists repeat some entities, as the [one row per entity](../11-csv-relationship-graph/index.md#one-row-per-entity) section of example 11 explains. Collapse them to one row per entity with the three awk scripts in this directory, [openflights-csv.awk](https://github.com/vela-tools/cassiopeia-examples/blob/v1.1.1/examples/12-csv-list-relationship/openflights-csv.awk), [collapse-countries.awk](https://github.com/vela-tools/cassiopeia-examples/blob/v1.1.1/examples/12-csv-list-relationship/collapse-countries.awk), and [collapse-planes.awk](https://github.com/vela-tools/cassiopeia-examples/blob/v1.1.1/examples/12-csv-list-relationship/collapse-planes.awk):
 
 ```bash
 awk -f openflights-csv.awk -f collapse-countries.awk data/countries.dat > data/countries.csv
@@ -104,7 +104,7 @@ docker run --rm \
     --volume "$PWD:/data" \
     --volume "$HOME/.cache/cassiopeia-examples/schemas:/var/lib/cassiopeia/schemas" \
     --workdir /data \
-    ghcr.io/vela-tools/cassiopeia:v1.1.0 \
+    ghcr.io/vela-tools/cassiopeia:v1.1.1 \
     map \
     --manifest manifest.json5
 ```

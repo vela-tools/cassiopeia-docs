@@ -157,7 +157,7 @@ The first run starts immediately; later runs wait for the schedule trigger. Add 
 
 ## Start the broker
 
-The [docker-compose.yml](https://github.com/vela-tools/cassiopeia-examples/blob/v1.1.0/examples/23-json-scheduling/docker-compose.yml) starts [Scorpio](https://github.com/ScorpioBroker/ScorpioBroker), an open-source NGSI-LD broker backed by PostGIS. It serves the API on port 9090, the address the manifest sends to. Start it and wait for it to become healthy:
+The [docker-compose.yml](https://github.com/vela-tools/cassiopeia-examples/blob/v1.1.1/examples/23-json-scheduling/docker-compose.yml) starts [Scorpio](https://github.com/ScorpioBroker/ScorpioBroker), an open-source NGSI-LD broker backed by PostGIS. It serves the API on port 9090, the address the manifest sends to. Start it and wait for it to become healthy:
 
 ```bash
 docker compose up -d
@@ -179,7 +179,7 @@ docker run --rm \
     --volume "$PWD:/data" \
     --volume "$HOME/.cache/cassiopeia-examples/schemas:/var/lib/cassiopeia/schemas" \
     --workdir /data \
-    ghcr.io/vela-tools/cassiopeia:v1.1.0 \
+    ghcr.io/vela-tools/cassiopeia:v1.1.1 \
     map \
     --manifest manifest.json5
 ```

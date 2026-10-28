@@ -37,14 +37,14 @@ Two of the files list some entities more than once. Routes name their aircraft b
 
 Rows that resolve to the same ID merge into one entity, as the [ID collision example](../02-json-id-collision/index.md) shows. Where their values disagree, only one row's values survive: the `E7W` entity would describe either the long-wing or the short-wing model, and Palestine would keep one DAFIF code and lose the other.
 
-Two small awk scripts therefore collapse both lists to one row per entity ID before mapping. They share a CSV reader, [openflights-csv.awk](https://github.com/vela-tools/cassiopeia-examples/blob/v1.1.0/examples/11-csv-relationship-graph/openflights-csv.awk):
+Two small awk scripts therefore collapse both lists to one row per entity ID before mapping. They share a CSV reader, [openflights-csv.awk](https://github.com/vela-tools/cassiopeia-examples/blob/v1.1.1/examples/11-csv-relationship-graph/openflights-csv.awk):
 
 ```bash
 awk -f openflights-csv.awk -f collapse-countries.awk data/countries.dat > data/countries.csv
 awk -f openflights-csv.awk -f collapse-planes.awk data/planes.dat > data/aircraft-models.csv
 ```
 
-[collapse-planes.awk](https://github.com/vela-tools/cassiopeia-examples/blob/v1.1.0/examples/11-csv-relationship-graph/collapse-planes.awk) merges the rows that share an IATA code, and passes a row without one through unchanged. The merged name lists every model the code covers, separated by semicolons because the names themselves already use slashes. The script keeps the ICAO code only when the merged rows agree on one. `E75L` and `E75S` cannot both be the ICAO code of `E7W`, so these two rows:
+[collapse-planes.awk](https://github.com/vela-tools/cassiopeia-examples/blob/v1.1.1/examples/11-csv-relationship-graph/collapse-planes.awk) merges the rows that share an IATA code, and passes a row without one through unchanged. The merged name lists every model the code covers, separated by semicolons because the names themselves already use slashes. The script keeps the ICAO code only when the merged rows agree on one. `E75L` and `E75S` cannot both be the ICAO code of `E7W`, so these two rows:
 
 ```text
 "Embraer 175 (long wing)","E7W","E75L"
@@ -57,7 +57,7 @@ become one row with no ICAO code:
 "Embraer 175 (long wing); Embraer 175 (short wing)","E7W",\N
 ```
 
-[collapse-countries.awk](https://github.com/vela-tools/cassiopeia-examples/blob/v1.1.0/examples/11-csv-relationship-graph/collapse-countries.awk) merges the rows that share a name and puts all of their DAFIF codes in one column, separated by spaces:
+[collapse-countries.awk](https://github.com/vela-tools/cassiopeia-examples/blob/v1.1.1/examples/11-csv-relationship-graph/collapse-countries.awk) merges the rows that share a name and puts all of their DAFIF codes in one column, separated by spaces:
 
 ```text
 "Palestine","PS","GZ WE"
@@ -244,7 +244,7 @@ docker run --rm \
     --volume "$PWD:/data" \
     --volume "$HOME/.cache/cassiopeia-examples/schemas:/var/lib/cassiopeia/schemas" \
     --workdir /data \
-    ghcr.io/vela-tools/cassiopeia:v1.1.0 \
+    ghcr.io/vela-tools/cassiopeia:v1.1.1 \
     map \
     --manifest manifest.json5
 ```

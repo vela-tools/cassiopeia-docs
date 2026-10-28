@@ -81,7 +81,7 @@ The `FoodProduct` attributes cover different parts of the normalized shape:
 
 ## Author the schema
 
-The [food-product.schema.json](https://github.com/vela-tools/cassiopeia-examples/blob/v1.1.0/examples/28-json-advanced-schema/food-product.schema.json) schema uses draft-07 and describes each attribute's normalized wrapper. Only `id` and `type` are required. Measurements remain optional because a blank cell is omitted rather than emitted as null. The important constraints are ones a simplified schema cannot express:
+The [food-product.schema.json](https://github.com/vela-tools/cassiopeia-examples/blob/v1.1.1/examples/28-json-advanced-schema/food-product.schema.json) schema uses draft-07 and describes each attribute's normalized wrapper. Only `id` and `type` are required. Measurements remain optional because a blank cell is omitted rather than emitted as null. The important constraints are ones a simplified schema cannot express:
 
 ```json
 {
@@ -201,7 +201,7 @@ The `languageMap` must contain at least one string, but no particular language i
 
 ## The manifest
 
-The run is defined by the self-contained [manifest.json5](https://github.com/vela-tools/cassiopeia-examples/blob/v1.1.0/examples/28-json-advanced-schema/manifest.json5):
+The run is defined by the self-contained [manifest.json5](https://github.com/vela-tools/cassiopeia-examples/blob/v1.1.1/examples/28-json-advanced-schema/manifest.json5):
 
 ```json5
 {
@@ -230,7 +230,7 @@ Two manifest details matter. The custom schema is a **per-input `schema`** besid
 
 ## Write the mapping
 
-The [food-product.json5](https://github.com/vela-tools/cassiopeia-examples/blob/v1.1.0/examples/28-json-advanced-schema/food-product.json5) mapping carries no `schema` field. It only describes the record-to-entity transformation:
+The [food-product.json5](https://github.com/vela-tools/cassiopeia-examples/blob/v1.1.1/examples/28-json-advanced-schema/food-product.json5) mapping carries no `schema` field. It only describes the record-to-entity transformation:
 
 ```json5
 {
@@ -355,7 +355,7 @@ docker run --rm \
     --user "$(id -u):$(id -g)" \
     --volume "$PWD:/data" \
     --workdir /data \
-    ghcr.io/vela-tools/cassiopeia:v1.1.0 \
+    ghcr.io/vela-tools/cassiopeia:v1.1.1 \
     map \
     --manifest manifest.json5
 ```
