@@ -18,7 +18,7 @@ The tags match the releases:
 
 | Tag | Points at |
 | --- | --- |
-| `vX.Y.Z` | A specific release, for example `v1.0.0`. Pin to this for reproducible runs. |
+| `vX.Y.Z` | A specific release, for example `v1.1.1`. Pin to this for reproducible runs. |
 | `latest` | The most recent stable release. Never a prerelease. |
 | `vX.Y.Z-alpha.N`, `-beta.N`, `-rc.N` | A prerelease. These do not move `latest`. |
 
@@ -35,7 +35,7 @@ Unlike the prebuilt release binaries, the image is a **default build**. Its runt
 Every published image is signed with [cosign](https://docs.sigstore.dev/) using keyless signing, so there is no public key to distribute. The signature carries a short-lived certificate that names the repository, the workflow, and the git ref the image was built from, and cosign records it in the public Sigstore transparency log. Install cosign, then verify a release:
 
 ```bash
-cosign verify ghcr.io/vela-tools/cassiopeia:v1.0.0 \
+cosign verify ghcr.io/vela-tools/cassiopeia:v1.1.1 \
     --certificate-identity-regexp '^https://github\.com/vela-tools/cassiopeia/\.github/workflows/docker\.yaml@refs/tags/v' \
     --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
@@ -53,7 +53,7 @@ cosign verify ghcr.io/vela-tools/cassiopeia@sha256:... \
 Each image also carries a SLSA build provenance attestation, stored by GitHub and pushed to the registry beside the image. Where the cosign signature says the image was signed by this repository, the attestation records how it was built: the commit, the workflow, and the run. Verify it with the GitHub CLI:
 
 ```bash
-gh attestation verify oci://ghcr.io/vela-tools/cassiopeia:v1.0.0 --repo vela-tools/cassiopeia
+gh attestation verify oci://ghcr.io/vela-tools/cassiopeia:v1.1.1 --repo vela-tools/cassiopeia
 ```
 
 Add `--signer-workflow vela-tools/cassiopeia/.github/workflows/docker.yaml` to pin the check to the image workflow rather than accepting any workflow in the repository.
