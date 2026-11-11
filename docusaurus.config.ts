@@ -10,7 +10,7 @@ const siteHome = `${siteUrl}${baseUrl}`;
 const asset = (path: string) => `${siteHome}${path}`;
 
 const tagline =
-  'Convert CSV, JSON, GeoJSON, KML/KMZ, XML, Shapefiles, and GRIB into validated, standards-compliant context data.';
+  'Convert CSV, JSON, GeoJSON, KML/KMZ, XML, Shapefiles, GeoPackages, GRIB, and NetCDF into validated, standards-compliant context data.';
 
 // Search keywords, used as the default <meta name="keywords"> and as the
 // fallback for pages that declare none of their own. NGSI-LD, FIWARE and the
@@ -83,7 +83,7 @@ const structuredData = {
       applicationCategory: 'DeveloperApplication',
       applicationSubCategory: 'Data transformation',
       description:
-        'Cassiopeia turns CSV, JSON, GeoJSON, KML/KMZ, XML, ESRI Shapefiles and GRIB into validated NGSI-LD entities, then writes them to files or delivers them to a context broker.',
+        'Cassiopeia turns CSV, JSON, GeoJSON, KML/KMZ, XML, ESRI Shapefiles, GeoPackages, GRIB and NetCDF into validated NGSI-LD entities, then writes them to files or delivers them to a context broker.',
       operatingSystem: 'Linux, macOS, Windows',
       programmingLanguage: 'Rust',
       url: siteHome,
@@ -202,17 +202,17 @@ const config: Config = {
         // exist here.
         docsDir: [
           {
-            path: 'versioned_docs/version-1.1.1',
+            path: 'versioned_docs/version-1.2.0',
             routeBasePath: 'docs',
           },
         ],
         title: 'Cassiopeia',
         description: tagline,
-        version: '1.1.1',
+        version: '1.2.0',
         rootContent: [
           'Cassiopeia is an open-source (EUPL-1.2) command-line tool that turns CSV, JSON, GeoJSON,',
-          'KML/KMZ, XML, ESRI Shapefiles and GRIB into validated NGSI-LD entities, then writes them',
-          'to files or delivers them to an NGSI-LD context broker.',
+          'KML/KMZ, XML, ESRI Shapefiles, GeoPackages, GRIB and NetCDF into validated NGSI-LD',
+          'entities, then writes them to files or delivers them to an NGSI-LD context broker.',
           '',
           'A mapping is a JSON5 document that names the target data model, derives an entity ID, and',
           'turns record fields into NGSI-LD attributes with Tera templates. A manifest packages one or',
@@ -253,12 +253,13 @@ const config: Config = {
         docs: {
           // Docs live under /docs so the React landing page can own '/'.
           routeBasePath: '/docs',
-          // Versioned only, no unversioned `docs/` current version: edits go
-          // straight into versioned_docs/version-<v> and each sidebar lives in
+          // Versioned only, no unversioned `docs/` current version: every page
+          // lives in versioned_docs/version-<v> and each sidebar lives in
           // versioned_sidebars/version-<v>-sidebars.json. The newest entry in
           // versions.json is the default and is served at the site root. To cut
-          // the next release, copy both and add the version to versions.json —
-          // `docusaurus docs:version` needs a current version and won't work.
+          // the next release, run tools/import-docs.mjs and add the version to
+          // versions.json — `docusaurus docs:version` needs a current version
+          // and won't work.
           includeCurrentVersion: false,
           // The example directories are numbered, and that number is the
           // reading order rather than a sorting artefact to be stripped. Off,
@@ -274,8 +275,12 @@ const config: Config = {
           // them out of that contest; the matching sitemap exclusion below
           // stops the site advertising URLs it asks not to be indexed.
           versions: {
+            '1.2.0': {
+              label: 'v1.2.0',
+            },
             '1.1.1': {
               label: 'v1.1.1',
+              noIndex: true,
             },
             '1.1.0': {
               label: 'v1.1.0',
@@ -323,6 +328,7 @@ const config: Config = {
             '/docs/1.0.2/**',
             '/docs/1.0.3/**',
             '/docs/1.1.0/**',
+            '/docs/1.1.1/**',
           ],
         },
       } satisfies Preset.Options,

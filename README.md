@@ -5,7 +5,7 @@
 <h1 align="center">Cassiopeia Documentation</h1>
 
 <p align="center">
-  <strong>The guides and reference for <a href="https://github.com/vela-tools/cassiopeia">Cassiopeia</a>, the pipeline that turns CSV, JSON, GeoJSON, KML/KMZ, XML, ESRI Shapefiles, and GRIB into validated <a href="https://ngsi-ld.org/">NGSI-LD</a> entities.</strong>
+  <strong>The guides and reference for <a href="https://github.com/vela-tools/cassiopeia">Cassiopeia</a>, the pipeline that turns CSV, JSON, GeoJSON, KML/KMZ, XML, ESRI Shapefiles, GeoPackages, GRIB, and NetCDF into validated <a href="https://ngsi-ld.org/">NGSI-LD</a> entities.</strong>
 </p>
 
 <p align="center">
@@ -53,12 +53,12 @@ npm run serve                                  # serve the built output
 
 ## How the docs are versioned
 
-The site is versioned only. There is no current `docs/` directory, and `includeCurrentVersion` is off, so an edit goes straight into `versioned_docs/version-<v>` and its sidebar lives in `versioned_sidebars/version-<v>-sidebars.json`. The newest entry in `versions.json` is the default and is served at `/docs`, without a version in the path.
+The site is versioned only. There is no current `docs/` directory, and `includeCurrentVersion` is off, so every page lives in `versioned_docs/version-<v>` and its sidebar lives in `versioned_sidebars/version-<v>-sidebars.json`. The newest entry in `versions.json` is the default and is served at `/docs`, without a version in the path.
 
-To cut a release, copy the newest version directory and its sidebar, add the version to `versions.json`, and name it in the `versions` map in `docusaurus.config.ts`. `docusaurus docs:version` needs a current version and will not work here. Then run `npm run sync:examples`, which gives the new version the examples tagged for it, or none until that tag exists.
+To cut a release, run `npm run import:docs -- --version <v>`, which writes the new version's guides, reference pages, and sidebar from the Cassiopeia release tag. Add the version to `versions.json`, name it in the `versions` map in `docusaurus.config.ts`, mark the version it replaces `noIndex` and add that one to the sitemap's `ignorePatterns`, and point `docusaurus-plugin-llms` at the new directory. `docusaurus docs:version` needs a current version and will not work here. Then run `npm run sync:examples`, which gives the new version the examples tagged for it, or none until that tag exists.
 
 ```
-versioned_docs/version-1.1.1/
+versioned_docs/version-1.2.0/
 ├── index.md
 ├── guides/                                    # the reading order, twelve pages
 ├── reference/                                 # CLI, Docker, TUI, architecture, NGSI-LD
@@ -66,6 +66,18 @@ versioned_docs/version-1.1.1/
 ```
 
 `docusaurus-plugin-llms` points at the newest version and writes `llms.txt`, `llms-full.txt`, and a markdown copy of every page into the build output.
+
+## Where the guides come from
+
+The guides and the reference pages are written in the `docs/` directory of [vela-tools/cassiopeia](https://github.com/vela-tools/cassiopeia), where a page changes in the same commit as the behaviour it describes. The pages under `versioned_docs/version-<v>` outside `examples` are copies of that directory at the release tag, and `npm run import:docs` writes them. It moves each page to its place under `guides/` or `reference/`, rewrites its links to stay inside the version, turns GitHub alerts into admonitions, and makes the image tags in its commands name the release. The prose is edited in the Cassiopeia repository and never here.
+
+The front matter is the one part written here. Importing again keeps the front matter a version already has, and a new version starts from the previous version's. The import lists every page whose prose changed since the previous version, so its title, description, and keywords can be checked against what it now says. A page in `docs/` that the import does not know stops it, until the page is given a place in the script and in the sidebar.
+
+```bash
+npm run import:docs -- --version 1.2.0                                  # from tag v1.2.0 on GitHub
+npm run import:docs -- --version 1.2.0 --source ../../cassiopeia        # the same, from a local checkout's history
+npm run import:docs -- --version 1.2.0 --ref <commit>                   # from a commit before the tag exists
+```
 
 ## Where the examples are
 
