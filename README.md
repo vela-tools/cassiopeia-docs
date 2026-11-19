@@ -5,7 +5,7 @@
 <h1 align="center">Cassiopeia Documentation</h1>
 
 <p align="center">
-  <strong>The guides and reference for <a href="https://github.com/vela-tools/cassiopeia">Cassiopeia</a>, the pipeline that turns CSV, JSON, GeoJSON, KML/KMZ, XML, ESRI Shapefiles, GeoPackages, GRIB, and NetCDF into validated <a href="https://ngsi-ld.org/">NGSI-LD</a> entities.</strong>
+  <strong>The guides and reference for <a href="https://github.com/vela-tools/cassiopeia">Cassiopeia</a>, the pipeline that turns CSV, JSON, GeoJSON, KML/KMZ, XML, ESRI Shapefiles, GeoPackages, GRIB, NetCDF, and OGC SensorThings API data into validated <a href="https://ngsi-ld.org/">NGSI-LD</a> entities.</strong>
 </p>
 
 <p align="center">

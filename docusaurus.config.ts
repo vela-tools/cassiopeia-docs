@@ -10,7 +10,7 @@ const siteHome = `${siteUrl}${baseUrl}`;
 const asset = (path: string) => `${siteHome}${path}`;
 
 const tagline =
-  'Convert CSV, JSON, GeoJSON, KML/KMZ, XML, Shapefiles, GeoPackages, GRIB, and NetCDF into validated, standards-compliant context data.';
+  'Convert CSV, JSON, GeoJSON, KML/KMZ, XML, Shapefiles, GeoPackages, GRIB, NetCDF, and OGC SensorThings API data into validated, standards-compliant context data.';
 
 // Search keywords, used as the default <meta name="keywords"> and as the
 // fallback for pages that declare none of their own. NGSI-LD, FIWARE and the
@@ -83,7 +83,7 @@ const structuredData = {
       applicationCategory: 'DeveloperApplication',
       applicationSubCategory: 'Data transformation',
       description:
-        'Cassiopeia turns CSV, JSON, GeoJSON, KML/KMZ, XML, ESRI Shapefiles, GeoPackages, GRIB and NetCDF into validated NGSI-LD entities, then writes them to files or delivers them to a context broker.',
+        'Cassiopeia turns CSV, JSON, GeoJSON, KML/KMZ, XML, ESRI Shapefiles, GeoPackages, GRIB, NetCDF and OGC SensorThings API data into validated NGSI-LD entities, then writes them to files or delivers them to a context broker.',
       operatingSystem: 'Linux, macOS, Windows',
       programmingLanguage: 'Rust',
       url: siteHome,
@@ -211,8 +211,9 @@ const config: Config = {
         version: '1.3.0',
         rootContent: [
           'Cassiopeia is an open-source (EUPL-1.2) command-line tool that turns CSV, JSON, GeoJSON,',
-          'KML/KMZ, XML, ESRI Shapefiles, GeoPackages, GRIB and NetCDF into validated NGSI-LD',
-          'entities, then writes them to files or delivers them to an NGSI-LD context broker.',
+          'KML/KMZ, XML, ESRI Shapefiles, GeoPackages, GRIB, NetCDF and OGC SensorThings API data',
+          'into validated NGSI-LD entities, then writes them to files or delivers them to an NGSI-LD',
+          'context broker.',
           '',
           'A mapping is a JSON5 document that names the target data model, derives an entity ID, and',
           'turns record fields into NGSI-LD attributes with Tera templates. A manifest packages one or',

@@ -10,7 +10,7 @@ A schedule makes a run repeat instead of exiting after one pass. It turns a one-
 
 Every scheduling setting has two equivalent forms: a field inside a manifest's `schedule` block and a command-line flag on `cassiopeia map`. This page gives both forms. The manifest field table is in the [manifest guide](./manifests.md#schedule).
 
-Whichever form you use, the first run fires immediately. Every later run waits for the trigger. With no bound, the command stays alive and keeps firing until you interrupt it (Ctrl-C).
+Whichever form you use, the first run fires immediately. Every later run waits for the trigger. With no bound, the command stays alive and keeps firing until you stop it with Ctrl+C, SIGTERM or SIGHUP. The cycle in progress then ends at its next stopping point and is reported as stopped, and the schedule ends. See [Stop a run](./running.md#stop-a-run).
 
 ## The three triggers
 
@@ -84,7 +84,7 @@ The remaining settings limit how long the schedule runs and control how it handl
 | Retry a failed run | `retry` | `--retry` + `--retry-backoff` | See below. |
 | React to a failure for good | `onFailure` (top-level, not under `schedule`) | `--on-failure` | `abort` (the default) ends the schedule at once; `continue` logs the failure and waits for the next run, exiting non-zero when the schedule finishes; `ignore` logs it, waits, and exits zero. |
 
-`retry` re-attempts a single failed run before the schedule treats it as failed. A retried run fetches every input again, so it is not the place to handle a source that limits how often it is asked: a source that answers `429` or a `5xx` is already asked again on its own first, as [Retried requests](./manifests.md#retried-requests) describes. In a manifest, it is an object with a required `maxAttempts` of at least 1 and an optional `backoff` duration between attempts. The default backoff is `5s`:
+`retry` re-attempts a single failed run before the schedule treats it as failed. A retried run fetches every input again, into a scratch folder of its own, so it is not the place to handle a source that limits how often it is asked: a source that answers `429` or a `5xx`, or whose answer is cut short, is already asked again on its own first, as [Retried requests](./manifests.md#retried-requests) describes. A stop during the wait between two attempts stops the cycle, which is then reported as stopped rather than failed. In a manifest, it is an object with a required `maxAttempts` of at least 1 and an optional `backoff` duration between attempts. The default backoff is `5s`:
 
 ~~~json5
 schedule: {

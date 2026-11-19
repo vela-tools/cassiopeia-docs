@@ -109,11 +109,11 @@ A `null` nested inside a source value is left out of it, because NGSI-LD admits 
 
 ## Temporal output
 
-Temporality is a property of attributes, not of the entity (ETSI GS CIM 009 v1.9.1 clause 4.5.5). A record marks an attribute as an observation by giving it an `observedAt`; every observation of one base ID accumulates onto that entity. The `temporal` setting chooses what is written:
+Temporality is a property of attributes, not of the entity (ETSI GS CIM 009 v1.9.1 clause 4.5.5). A record marks an attribute as an observation by giving it an `observedAt`; every observation of one base ID is an observation of that one entity, not an entity of its own. The `temporal` setting chooses which of them are written:
 
 | Setting | Meaning |
 | --- | --- |
-| absent | Current-state: one entity per ID, each attribute keeping its latest observation (ranked by `observedAt`, which is retained as a qualifier). The default. |
+| absent | Current-state, the default: one entity per ID, holding, per mapping, each attribute from the record with its latest `observedAt`, which is retained as a qualifier, and the attributes without one from the newest record. Only the latest observation of each attribute is written, and an attribute that only an older record carries is not written either. A Context Broker destination with `operation: "temporal"` instead sends each observation to the temporal endpoint on its own (see [Operations](#operations)). |
 | `representation: "series"` | Fold every observation of one ID into a single NGSI-LD EntityTemporal (clause 5.2.20): the entity appears once and each temporal attribute is a time-ordered array of instances. |
 
 ~~~json5
@@ -126,11 +126,13 @@ output: {
 }
 ~~~
 
-The setting shapes what Cassiopeia produces, not where it sends the result, so it applies to file and broker destinations alike. The series fold touches only temporal attributes. An attribute without `observedAt`, such as a name, is kept once. Cassiopeia sorts each attribute's instances oldest first, so the arrays read as a series through time.
+The setting shapes what Cassiopeia produces, not where it sends the result, so it applies to file and broker destinations alike. The series fold touches only temporal attributes. An attribute without `observedAt`, such as a name, is kept once, from the entity's first record in the source: the first record that holds it in the order the input lists its records, and over several inputs, in the first of them in the manifest. Cassiopeia sorts each attribute's instances oldest first, so the arrays read as a series through time; instances with the same `observedAt` keep the order of their records in the source. A file lists the folded entities in the order their first records come in the source, so two runs over the same input write the same files.
 
 The difference is plainest in a file. Current-state writes one object per ID holding the latest reading; `series` writes one object per ID whose attributes are instance arrays. Against a broker the stored temporal history is the same either way when observations are posted to the temporal endpoint; the representation changes only whether Cassiopeia folds each ID before delivery.
 
-The series fold is a streaming stage between validation and writing, not a buffer over the whole run. It groups an ID's observations as they arrive and emits each folded entity as soon as the next ID begins, so it holds one ID's observations at a time rather than the run's whole output. Because a folded EntityTemporal only belongs at a broker's `/temporal/entities` endpoint, `representation: "series"` against a Context Broker requires `operation: "temporal"`.
+The series fold is a streaming stage between validation and writing, not a buffer over the whole run. It groups an ID's observations as they arrive and emits each folded entity as soon as the next ID begins, so it holds one ID's observations at a time rather than the run's whole output. It checks each folded entity for the members its schema requires at the top level, which an observation may lack while another observation of the same ID holds them (see [Series output](./validation.md#series-output)). Because a folded EntityTemporal only belongs at a broker's `/temporal/entities` endpoint, `representation: "series"` against a Context Broker requires `operation: "temporal"`.
+
+A SensorThings snapshot of a `range` or `incremental` read holds one record per Observation, so it is read only with `representation: "series"`; current-state output would keep one reading of each Thing, and the run fails instead (see [Records per read](./source-formats.md#records-per-read)). A range read of a SensorThings server is refused without it in the same way, when the run is built. A scheduled latest read of a SensorThings server into `operation: "temporal"` is refused too, because every cycle would store each unchanged reading again (see [SensorThings settings](./manifests.md#sensorthings-settings)).
 
 ## Write to files
 
@@ -144,6 +146,8 @@ File output is split by entity type. The file name combines the entity type with
 | `line-delimited` | Yes | `.ndjsonld` | One JSON-LD entity per line |
 
 The default framing is `array`. An array file is valid, pretty-printed JSON. Empty array output is `[]`.
+
+A file lists its entities in the order their first records come in the source. Within one input, that is the order the input lists its records, and an entity whose records are spread through the input is listed at the place of its first one. Over several inputs, the entities of the first input in the manifest come first, then those first met in the next input, and so on. Two runs over the same input write the same files, whichever entity store they use.
 
 Line-delimited output contains one compact entity on each newline-terminated line and has no surrounding array. It suits streaming, appending, and tools that process one entity at a time. Empty line-delimited output is an empty file, not an empty JSON array.
 
@@ -322,6 +326,8 @@ output: {
 Header values are treated as secrets by the writer and are not included in its debug representation. Keep credentials out of files that will be committed or shared. The `userAgent` field sets the HTTP `User-Agent`. When it is omitted, the build-time application default is used.
 
 ## Broker delivery behavior
+
+The writer sends entities in the order a file lists them: each request holds the next entities in that order, and the requests are queued in that order. Several requests can be in flight at once, so when a run sends more than one request, they can reach the broker in another order. A run writes each entity once, so the order in which its requests arrive does not change what the broker holds when the run ends.
 
 The broker writer retries transport failures, HTTP 429 responses, and server-side 5xx responses with backoff. When a 429 or 5xx carries a `Retry-After` header (RFC 9110 section 10.2.3), the next attempt waits at least that long. A remote input is retried under the same rule, as the [manifest guide](./manifests.md#retried-requests) describes. It can split a failed array request into smaller requests, allowing a batch that is too large for the broker to make progress without discarding every entity. A 413 response is treated as a size signal and causes the same split behavior.
 

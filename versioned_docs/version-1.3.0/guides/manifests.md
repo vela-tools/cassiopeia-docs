@@ -2,7 +2,7 @@
 title: "Manifests"
 sidebar_label: "Manifests"
 description: "Package inputs, mappings, output, and scheduling into one reusable JSON5 run description that behaves the same on a laptop, in a container, or on a server."
-keywords: ["manifest", "JSON5", "reusable run", "inputs", "schedule", "CSV dialect", "run variables", "environment variables"]
+keywords: ["manifest", "JSON5", "reusable run", "inputs", "schedule", "CSV dialect", "run variables", "environment variables", "SensorThings API"]
 ---
 # Manifests
 
@@ -85,6 +85,7 @@ inputs: [
 | `schema` | No | A per-input custom validation schema. Use a local path or an `http(s)` URL. It wins over the output-level `output.validation.schema` for the types this input produces. |
 | `headers` | No | Extra HTTP headers sent on every request that fetches a remote `source`, such as an API key. See [Per-input headers](#per-input-headers). |
 | `vars` | No | Variables for this input's records alone, winning over a top-level variable of the same name. See [Run variables](#run-variables). |
+| `sensorthings` | No | How a SensorThings API server is read, for a remote input whose `format` is `sensorthings`. See [SensorThings settings](#sensorthings-settings). |
 
 ### One mapping or many
 
@@ -125,6 +126,7 @@ The `format` field accepts one of the following values. When omitted, it default
 | `shapefile` | ESRI Shapefile, plain or zipped. |
 | `geopackage` | OGC GeoPackage. Also spelled `geo-package`. |
 | `netcdf` | NetCDF, classic or NetCDF-4. Also spelled `net-cdf`. |
+| `sensorthings` | OGC SensorThings API: a server's service root, or a snapshot file. Also spelled `sensor-things`. See [SensorThings settings](#sensorthings-settings). |
 
 The [source-format guide](./source-formats.md) describes the records each format produces.
 
@@ -203,7 +205,148 @@ Cassiopeia sends every configured header on every request for that input, in eve
 
 ### Retried requests
 
-A remote `source` that answers `429 Too Many Requests` or a `5xx` is asked again with backoff, the same way the broker writer retries the broker: up to three attempts in all, 1s and then 2s apart. When the answer carries a `Retry-After` header (RFC 9110 section 10.2.3), in seconds or as a date, the next attempt waits at least that long, even past the backoff. Only when the attempts are spent does the input fail, with the source's last answer, and with it the cycle under [`onFailure`](#top-level-structure). Any other `4xx` fails the input at once, since it points at a wrong URL, a missing key, or a refused request that asking again cannot change. A remote `schema` is fetched under the same rule. Stopping the run with CTRL+C ends a wait at once.
+A remote `source` that answers `429 Too Many Requests` or a `5xx` is asked again with backoff, the same way the broker writer retries the broker: up to three attempts in all, 1s and then 2s apart. When the answer carries a `Retry-After` header (RFC 9110 section 10.2.3), in seconds or as a date, the next attempt waits at least that long, even past the backoff. A request that gets no answer, such as one whose connection is refused or reset, or a `200` whose body is cut short, is asked again in the same way. Only when the attempts are spent does the input fail, with the source's last answer or transport failure, and with it the cycle under [`onFailure`](#top-level-structure). Any other `4xx` fails the input at once, since it points at a wrong URL, a missing key, or a refused request that asking again cannot change. A remote `schema`, and every request to a SensorThings server, is fetched under the same rule. Stopping the run with Ctrl+C, SIGTERM or SIGHUP ends a wait at once. A stop is not a failure, so the input does not fail and the cycle is reported as stopped (see [Stop a run](./running.md#stop-a-run)).
+
+### SensorThings settings
+
+A remote input with `format: "sensorthings"` reads an OGC SensorThings API server. Its `source` is the server's service root, such as `https://api-samenmeten.rivm.nl/v1.0`, and its optional `sensorthings` block selects the data streams, Datastreams and MultiDatastreams, and limits the read:
+
+~~~json5
+inputs: [
+    {
+        source: "https://api-samenmeten.rivm.nl/v1.0",
+        format: "sensorthings",
+        mapping: "air-quality-observed.json5",
+        sensorthings: {
+            datastreams: "startswith(name,'ILM_I67-') or startswith(name,'ILM_I68-')",
+            read: "latest",
+            pageSize: 10,
+            limits: { pages: 1000, observations: 500000 },
+            delay: "200ms",
+        },
+    },
+],
+~~~
+
+| Field | Value |
+| --- | --- |
+| `datastreams` | An OData `$filter` expression over Datastreams that selects the Datastreams read, such as `ObservedProperty/name eq 'pm10'` or `endswith(name,'-pm10')`. It is sent to the server as written, and must be one line with text on it. When omitted, every Datastream is read. It selects no MultiDatastream. |
+| `multiDatastreams` | The MultiDatastreams read, for a server with the MultiDatastream extension: `false` for none, the default; `true` for every one; or an OData `$filter` expression over MultiDatastreams, such as `startswith(name,'ws-')`, sent and checked as `datastreams` is. A MultiDatastream has `ObservedProperties` where a Datastream has an `ObservedProperty`, so each has a filter of its own. Below. |
+| `read` | `"latest"`, the default: the newest reading of every selected data stream. Or `{ range: { ... } }`: every reading of a time range. Or `{ incremental: { ... } }`: every reading gained since the last successful cycle. Both are below. |
+| `pageSize` | The `$top` of every request, 1 to 10000. The default is 1000. A server may serve fewer items a page. |
+| `limits.pages` | The most pages one request is followed for, at least 1. The default is 1000. A latest read sends one request for each kind of data stream it reads, and with `things` one for the Things; a range or incremental read sends one for each kind's discovery and one for each data stream, and with `historicalLocations: true` one for each Thing. |
+| `limits.observations` | The most Observations one cycle writes, at least 1, of Datastreams and MultiDatastreams together. The default is 500000. A range or incremental read stops reading Observations when it has written this many. HistoricalLocations are not counted, and are read after it stops. A latest read collects at most one Observation per data stream, so `limits.pages` alone bounds it. |
+| `delay` | A wait between consecutive requests, such as `"200ms"`, at most `"60s"`. The default is none. |
+| `featuresOfInterest` | `true` to read every Observation with its FeatureOfInterest, the place the reading was taken at. The default is `false`. Below. |
+| `historicalLocations` | `true` to read, in a range or incremental read, the HistoricalLocations of every Thing a listed data stream belongs to: the places the Thing was known at, and when. The default is `false`. A latest read refuses it. Below. |
+| `things` | The Things a latest read lists by themselves, besides the Things of the data streams it reads, which finds a Thing that has no data stream: `false` for none, the default; `true` for every one; or an OData `$filter` expression over Things, such as `startswith(name,'ILM_')`, sent and checked as `datastreams` is. A range or incremental read refuses it. Below. |
+
+A range read takes one of two forms:
+
+~~~json5
+read: { range: { last: "24h" } },
+read: { range: { from: "2026-11-01T00:00:00Z", to: "2026-11-02T00:00:00Z" } },
+~~~
+
+| Field | Value |
+| --- | --- |
+| `range.last` | The span before the cycle start that is read, such as `"24h"` or `"7days"`, longer than zero. |
+| `range.from` | The first instant read, an RFC 3339 date and time with a UTC offset, such as `2026-11-01T00:00:00Z`. |
+| `range.to` | The first instant past the range, in the same form. Allowed only beside `from`. Without it, the range ends at the cycle start. |
+
+A range states `last` or `from`, never both. [Reading a time range](./source-formats.md#reading-a-time-range) describes the bounds, the requests, and what each cycle sends.
+
+An incremental read names the cursor that keeps how far it has read each data stream:
+
+~~~json5
+read: { incremental: { cursor: "rivm-air" } },
+read: { incremental: { cursor: "rivm-air", initial: "2026-11-01T00:00:00Z", lookback: "2h" } },
+~~~
+
+| Field | Value |
+| --- | --- |
+| `incremental.cursor` | The cursor's name: 1 to 64 characters of `a-z`, `0-9` and `-`, neither starting nor ending with `-`. It names the cursor's store, `<cursor>.redb` in the cursors folder. |
+| `incremental.initial` | Where a data stream the cursor holds no position for starts: an RFC 3339 date and time with a UTC offset, or a span before the cycle start, such as `"7d"`, longer than zero. Any text that is no RFC 3339 instant is read as a span. The default is `"24h"`. |
+| `incremental.lookback` | How far behind its high-water mark each data stream is read again, to find readings a server uploads late, such as `"1h"`. At most `"7d"`. The default is `"1h"`. |
+
+[Reading new readings](./source-formats.md#reading-new-readings) describes the positions a cursor keeps, when they move, and what each destination receives.
+
+`featuresOfInterest: true` reads each reading with the place it was taken at, for a Thing that moves, such as a sensor on a bus:
+
+~~~json5
+sensorthings: {
+    datastreams: "startswith(name,'bus-')",
+    read: { range: { last: "24h" } },
+    featuresOfInterest: true,
+},
+~~~
+
+A range or incremental read then expands each Observation's FeatureOfInterest in each data stream's Observations request, selecting the members a reading reads from a version 1.1 server (see [Features of interest](./source-formats.md#features-of-interest)), and a latest read adds `;$expand=FeatureOfInterest` inside the newest Observation's expansion. Each reading carries a `featureOfInterest` with the FeatureOfInterest's `id`, `name`, `description` and `properties`, and the GeoJSON geometry of its `feature`. A FeatureOfInterest that is not GeoJSON gives no `feature`, and one `ingest-features-of-interest-unreadable` warning per source names the first one and counts the readings. A mapping places each reading where it was taken, and series output then writes one `location` instance per reading:
+
+~~~json5
+location: {
+    type: "GeoProperty",
+    source: "{{ readings.pm10.featureOfInterest.feature }}",
+    properties: {
+        observedAt: { source: "{{ readings.pm10.time }}", transformation: "datetime" },
+    },
+},
+~~~
+
+[Features of interest](./source-formats.md#features-of-interest) gives the requests, the member, and the servers that ignore the latest read's expansion.
+
+`multiDatastreams` reads the MultiDatastreams of a server with the MultiDatastream extension, each of which groups properties measured together, such as the wind speed and wind direction of a weather station:
+
+~~~json5
+sensorthings: {
+    datastreams: "startswith(name,'ws-')",
+    multiDatastreams: "startswith(name,'ws-')",
+    read: { range: { last: "24h" } },
+},
+~~~
+
+A read then sends the requests it sends for Datastreams to the MultiDatastreams collection as well, and each value of a MultiDatastream Observation becomes a reading of its own, keyed by the name of the ObservedProperty at its position. A server without the extension answers the MultiDatastreams requests with an error, and the input fails. A run whose input reads no MultiDatastreams checks once whether its server holds any, and one `collect-multi-datastreams-unread` warning names a server that does. [MultiDatastreams](./source-formats.md#multidatastreams) gives the requests, the readings, and their keys.
+
+`historicalLocations: true` reads where each Thing has been, for a Thing that moves, such as a bus:
+
+~~~json5
+sensorthings: {
+    datastreams: "startswith(name,'bus-')",
+    read: { range: { last: "24h" } },
+    historicalLocations: true,
+},
+~~~
+
+A range or incremental read then requests, after the Observations, the HistoricalLocations of each Thing a listed data stream belongs to, by ascending Thing id, each with its Locations, within the read's bounds. Each HistoricalLocation gives a record with the Thing's members and a `historicalLocation`: its `id`, its `time`, and the geometry of its GeoJSON Location with the lowest id as `location`. An incremental read keeps a position for each Thing beside those of its data streams. A HistoricalLocation whose `time` names no instant, or that has no GeoJSON Location, gives no record, and one `ingest-historical-locations-unreadable` warning per source names the first one. A latest read reads none, because its record's `location` already is the Thing's last known place, so `historicalLocations: true` with `read: "latest"`, or without `read`, is refused. [Historical locations](./source-formats.md#historical-locations) gives the requests, the records, and a mapping that writes a Thing's track.
+
+`things` lists the Things that have no data stream, such as a station whose sensors are not connected yet, for a mapping that keeps an inventory of a server's stations:
+
+~~~json5
+sensorthings: {
+    datastreams: "startswith(name,'ILM_')",
+    things: "startswith(name,'ILM_')",
+},
+~~~
+
+A latest read then lists the Things after its data streams, each with its Locations, and each Thing that no data stream names gives a record with `server`, `thing`, `location` and `locations`, without `readings`, after the others. A Thing a data stream names gives one record, as without `things`. A range or incremental read lists no Thing, because it gives one record per Observation and a Thing without data streams has none, so `things: true` or an expression with a range or incremental read is refused. [Things without data streams](./source-formats.md#things-without-data-streams) gives the request, the snapshot line, the records, and an inventory mapping.
+
+Without a `sensorthings` block, a remote SensorThings input reads every Datastream and no MultiDatastream with the defaults. An unknown key in the block is refused. Credentials for a server go in [`headers`](#per-input-headers). [Reading a server](./source-formats.md#reading-a-server) describes the requests, the paging, and how servers differ.
+
+These are refused when the manifest loads:
+
+- a `sensorthings` block on an input whose `format` is not `sensorthings`;
+- a `sensorthings` block on a local snapshot, which is read as it was collected;
+- a remote `source` with `format: "sensorthings"` that is no service root: one without a version as its last path segment, with a version other than `v1.0` or `v1.1`, with a user name or password, a query, or a fragment, or with a scheme other than `http` or `https`;
+- a service root that reads an environment variable (`${NAME}`), so that no URL a read requests, logs, or writes carries a secret;
+- a `range` without `last` or `from`, with both, with `to` beside `last` or alone, with a `last` of zero, or with a `from` that is not before its `to`;
+- an `incremental` read without a `cursor`, with a cursor name outside its characters or length, with an unknown key, with an `initial` that is neither an RFC 3339 instant nor a span, or a span of zero, or with a `lookback` longer than `"7d"`;
+- a `featuresOfInterest` or a `historicalLocations` other than `true` or `false`;
+- `historicalLocations: true` on a latest read, which reads no HistoricalLocations. The error names the setting;
+- `things: true` or an expression on a range or incremental read, which lists no Thing. The error names the setting and the read;
+- a `datastreams` that is blank or holds a line break or another control character, and a `multiDatastreams` or a `things` that is not `true`, `false`, or such an expression. The error names the setting;
+- two inputs whose incremental reads name the same cursor, because each would move the positions the other resumes from. The error names the cursor.
+
+A range or incremental read without `output.temporal.representation: "series"` is refused when the run is built, before any request. It gives one record per Observation, and current-state output keeps one record per entity, so it would keep one reading of each Thing. A scheduled `read: "latest"` into a broker with `operation: "temporal"` is refused when the run is built. Every cycle would send the newest reading of every data stream again, and the temporal API would store each unchanged reading once more. A one-shot latest read into the temporal API is allowed, and so is a scheduled latest read into a broker with `operation: "upsert"`.
 
 ## Output
 
@@ -383,7 +526,7 @@ retry: {
 
 ## What makes a manifest invalid
 
-Cassiopeia rejects a manifest when `inputs` is empty, an input has both or neither of `mapping` and `mappings`, `mappings` is empty or names the same collection twice, `mappings` is used with a format that does not support collections, `dialect` is used on an input that does not declare `format: "csv"`, `headers` is used on an input with a local `source`, a `${NAME}` is malformed or names a variable that is not set, a local `source` reads an environment variable, or any field has a value outside its accepted set. Because the top level, `output`, `output.validation`, and `output.temporal` reject unknown keys, a stray or misspelled field there is also an error, and so is a setting of the other destination, such as `directory` on a `context-broker` output.
+Cassiopeia rejects a manifest when `inputs` is empty, an input has both or neither of `mapping` and `mappings`, `mappings` is empty or names the same collection twice, `mappings` is used with a format that does not support collections, `dialect` is used on an input that does not declare `format: "csv"`, `headers` is used on an input with a local `source`, a `sensorthings` block or a SensorThings `source` breaks a rule of [SensorThings settings](#sensorthings-settings), two inputs read through the same cursor, a `${NAME}` is malformed or names a variable that is not set, a local `source` reads an environment variable, or any field has a value outside its accepted set. Because the top level, `output`, `output.validation`, and `output.temporal` reject unknown keys, a stray or misspelled field there is also an error, and so is a setting of the other destination, such as `directory` on a `context-broker` output.
 
 ## Next steps
 

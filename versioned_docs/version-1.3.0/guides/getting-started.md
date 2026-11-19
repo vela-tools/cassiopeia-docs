@@ -30,6 +30,18 @@ GRIB comes in two editions. GRIB1 is decoded through [ecCodes](https://confluenc
 
 You do not install ecCodes yourself. A default build downloads the ecCodes, eckit, and libaec sources from their release tags and compiles them as part of the build. The definition tables ecCodes reads are compiled into the library, so the binary does not look for them on disk at run time. You can build with GRIB1 and install the build tools below, or leave GRIB1 out. Add one Cargo flag to whichever install command you use, as shown in [Installing](#installing).
 
+:::info
+
+gitlab.dkrz.de, the host libaec is downloaded from, has been offline since 2026-11-19, so a build that compiles ecCodes currently fails while it fetches libaec. Until the host is back, run these in the shell you install from, before the install command. They point `git` at the GitHub mirror of the libaec author, which serves the same release tag, and last only as long as that shell:
+
+```bash
+export GIT_CONFIG_COUNT=1
+export GIT_CONFIG_KEY_0=url.https://github.com/MathisRosenhauer/libaec.git.insteadOf
+export GIT_CONFIG_VALUE_0=https://gitlab.dkrz.de/k202009/libaec.git
+```
+
+:::
+
 ### Build tools for GRIB1
 
 A GRIB1 build needs CMake, a C and C++ compiler, `git` to fetch the sources, `libclang` for the bindings that `eccodes-sys` generates at build time, and the OpenJPEG library, which ecCodes uses to decode JPEG 2000 packed GRIB2 fields. OpenJPEG is linked from the system, so it must also be present wherever the binary runs. The build needs network access, and compiling ecCodes the first time takes several minutes.

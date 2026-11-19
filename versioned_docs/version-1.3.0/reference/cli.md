@@ -2,7 +2,7 @@
 title: "Command-line reference"
 sidebar_label: "Command-line reference"
 description: "Every cassiopeia subcommand and flag with its default, generated from the command-line interface itself."
-keywords: ["CLI", "flags", "subcommands", "reference", "cassiopeia map"]
+keywords: ["CLI", "flags", "subcommands", "reference", "cassiopeia map", "cassiopeia sensorthings"]
 ---
 # Command-Line Help for `cassiopeia`
 
@@ -28,6 +28,12 @@ This document contains the help content for the `cassiopeia` command-line progra
 * [`cassiopeia explorer`↴](#cassiopeia-explorer)
 * [`cassiopeia wizard`↴](#cassiopeia-wizard)
 * [`cassiopeia profile`↴](#cassiopeia-profile)
+* [`cassiopeia sensorthings`↴](#cassiopeia-sensorthings)
+* [`cassiopeia sensorthings readings`↴](#cassiopeia-sensorthings-readings)
+* [`cassiopeia sensorthings cursor`↴](#cassiopeia-sensorthings-cursor)
+* [`cassiopeia sensorthings cursor list`↴](#cassiopeia-sensorthings-cursor-list)
+* [`cassiopeia sensorthings cursor show`↴](#cassiopeia-sensorthings-cursor-show)
+* [`cassiopeia sensorthings cursor reset`↴](#cassiopeia-sensorthings-cursor-reset)
 * [`cassiopeia bugreport`↴](#cassiopeia-bugreport)
 
 ## `cassiopeia`
@@ -47,6 +53,7 @@ Map and transform source data into standards-compliant NGSI-LD entities.
 * `explorer` — Browse a Smart Data Model schema tree in the terminal
 * `wizard` — Author a mapping against a schema in the terminal
 * `profile` — Detect the source format of a data file
+* `sensorthings` — SensorThings API server operations
 * `bugreport` — Print a diagnostic report to attach when filing a bug
 
 ###### **Options:**
@@ -190,8 +197,8 @@ Generate a manifest file from command-line arguments
 ###### **Options:**
 
 * `-i`, `--input <INPUT>` — Data source file path or URL
-* `--input-header <NAME: VALUE>` — Extra HTTP header sent when fetching a remote input, written as `Name: Value`; repeat for several. Typically carries an API key, e.g. `--input-header "X-Api-Key: <key>"`. Refused for a local input. Recorded on the generated manifest as the input's `headers`
 * `-m`, `--mapping <FILE>` — JSON5 mapping file defining the transformation rules
+* `--input-header <NAME: VALUE>` — Extra HTTP header sent when fetching a remote input, written as `Name: Value`; repeat for several. Typically carries an API key, e.g. `--input-header "X-Api-Key: <key>"`. Refused for a local input. Recorded on the generated manifest as the input's `headers`
 * `-t`, `--type <FORMAT>` — Data format of the input source
 
   Default value: `auto`
@@ -219,12 +226,14 @@ Generate a manifest file from command-line arguments
     `NetCDF`: the classic CDF-1, CDF-2 and CDF-5 formats and `NetCDF-4` on HDF5
   - `xml`:
     Generic XML
+  - `sensorthings`:
+    An OGC SensorThings API snapshot file: the readings one SensorThings read collected, as JSON Lines
 
 * `--on-failure <MODE>` — How the run reacts to a failed cycle and what it exits with: abort (stop and exit non-zero), continue (run the rest, still exit non-zero), or ignore (run the rest, exit zero). Defaults to abort. Recorded on the generated manifest as `onFailure`
 * `-M`, `--manifest-output <FILE>` — Output path for the generated manifest
 
   Default value: `manifest.json5`
-* `-w`, `--writer <TYPE>` — Where to write results: the file system or a Context Broker
+* `-w`, `--writer <WRITER>` — Where to write results: the file system or a Context Broker
 
   Possible values:
   - `file`:
@@ -232,7 +241,7 @@ Generate a manifest file from command-line arguments
   - `context-broker`:
     Send entities to an NGSI-LD context broker
 
-* `-o`, `--directory <DIRECTORY>` — Output directory (for the file writer)
+* `-o`, `--output <DIRECTORY>` — Output directory (for the file writer)
 * `--framing <FRAMING>` — File framing: a JSON array or line-delimited entities (file writer only)
 
   Default value: `array`
@@ -243,7 +252,7 @@ Generate a manifest file from command-line arguments
   - `line-delimited`:
     One compact entity per line, with no surrounding array: append-friendly and re-indent-free
 
-* `--representation <REPRESENTATION>` — NGSI-LD representation for written entities
+* `--writer-representation <REPRESENTATION>` — NGSI-LD representation for written entities
 
   Possible values:
   - `normalized`:
@@ -253,7 +262,7 @@ Generate a manifest file from command-line arguments
   - `simplified`:
     Flat key-value representation without metadata
 
-* `--temporal-representation <REPRESENTATION>` — Temporal output shape. `series` folds each id's observations into one temporal entity with instance arrays (ETSI GS CIM 009 v1.9.1 clause 5.2.20); absent writes current-state (one entity per id, latest per attribute). A general output shape, valid for the file writer and the broker
+* `--temporal-representation <REPRESENTATION>` — Temporal output shape. `series` folds each id's observations into one temporal entity with instance arrays (ETSI GS CIM 009 v1.9.1 clause 5.2.20); absent writes current-state (one entity per id, holding per mapping each attribute from the record with its latest `observedAt` and the attributes without one from the newest record; `--broker-operation temporal` sends each observation on its own instead). A general output shape, valid for the file writer and the broker
 * `--validation-representation <REPRESENTATION>` — NGSI-LD representation the validator serializes entities in
 
   Possible values:
@@ -379,8 +388,8 @@ Map data to a Smart Data Model
 
    A manifest describes the whole run, so it is mutually exclusive with every inline run-shaping flag: input, mapping, and type, and every output, context, validation, schedule, and failure-policy flag. Engine knobs that are not part of a run's description (the pipeline mode, the store backends, the memory profile) remain valid alongside it.
 * `-i`, `--input <INPUT>` — Data source file path or URL
-* `--input-header <NAME: VALUE>` — Extra HTTP header sent when fetching a remote input, written as `Name: Value`; repeat for several. Typically carries an API key, e.g. `--input-header "X-Api-Key: <key>"`. Refused for a local input
 * `-m`, `--mapping <FILE>` — JSON5 mapping file defining the transformation rules
+* `--input-header <NAME: VALUE>` — Extra HTTP header sent when fetching a remote input, written as `Name: Value`; repeat for several. Typically carries an API key, e.g. `--input-header "X-Api-Key: <key>"`. Refused for a local input
 * `-t`, `--type <FORMAT>` — Data format of the input source
 
   Default value: `auto`
@@ -408,6 +417,8 @@ Map data to a Smart Data Model
     `NetCDF`: the classic CDF-1, CDF-2 and CDF-5 formats and `NetCDF-4` on HDF5
   - `xml`:
     Generic XML
+  - `sensorthings`:
+    An OGC SensorThings API snapshot file: the readings one SensorThings read collected, as JSON Lines
 
 * `--var <KEY=VALUE>` — A run-level variable, written as `KEY=VALUE`; repeat for several. Every mapping in the run can read it as `{{ vars.KEY }}`. Valid alongside `--manifest`, where it overrides a manifest global `vars` of the same name (a per-input `vars` still wins). A repeated key keeps the last value
 * `--on-failure <MODE>` — How the run reacts to a failed cycle and what it exits with: abort (stop and exit non-zero), continue (run the rest, still exit non-zero), or ignore (run the rest, exit zero). Defaults to abort
@@ -465,7 +476,7 @@ Map data to a Smart Data Model
   - `simplified`:
     Flat key-value representation without metadata
 
-* `--temporal-representation <REPRESENTATION>` — Temporal output shape. `series` folds each id's observations into one temporal entity with instance arrays (ETSI GS CIM 009 v1.9.1 clause 5.2.20); absent writes current-state (one entity per id, latest per attribute). A general output shape, valid for the file writer and the broker
+* `--temporal-representation <REPRESENTATION>` — Temporal output shape. `series` folds each id's observations into one temporal entity with instance arrays (ETSI GS CIM 009 v1.9.1 clause 5.2.20); absent writes current-state (one entity per id, holding per mapping each attribute from the record with its latest `observedAt` and the attributes without one from the newest record; `--broker-operation temporal` sends each observation on its own instead). A general output shape, valid for the file writer and the broker
 * `-u`, `--broker-url <URL>` — Context Broker URL (required when --writer is context-broker)
 * `--broker-operation <OPERATION>` — Which NGSI-LD operation each request performs (context-broker writer only)
 
@@ -598,6 +609,98 @@ Detect the source format of a data file
 ###### **Arguments:**
 
 * `<FILE>` — The file to profile
+
+
+
+## `cassiopeia sensorthings`
+
+SensorThings API server operations
+
+**Usage:** `cassiopeia sensorthings <COMMAND>`
+
+###### **Subcommands:**
+
+* `readings` — List the readings a SensorThings API server offers
+* `cursor` — Inspect and reset the cursors of incremental reads
+
+
+
+## `cassiopeia sensorthings readings`
+
+List the readings a SensorThings API server offers.
+
+Prints one row per ObservedProperty name, the name a mapping reads as `readings.<name>`, with the units of its readings, the UN/CEFACT codes `cefact_unit` resolves them to (`unknown` for one it does not resolve), the number of its Datastreams, the number of MultiDatastreams with an element of the name, and the number of Things that hold more than one reading of the name. MultiDatastreams are listed when the server's service root lists them.
+
+**Usage:** `cassiopeia sensorthings readings [OPTIONS] <SERVICE_ROOT>`
+
+###### **Arguments:**
+
+* `<SERVICE_ROOT>` — The server's service root, ending with the version it serves, such as `https://api-samenmeten.rivm.nl/v1.0`. It carries no credentials: send them with `--input-header`
+
+###### **Options:**
+
+* `--datastreams <EXPRESSION>` — An OData `$filter` over Datastreams that selects the Datastreams listed, such as `ObservedProperty/name eq 'pm10'`; every Datastream when absent
+* `--multi-datastreams <EXPRESSION>` — An OData `$filter` over MultiDatastreams that selects the MultiDatastreams listed, such as `startswith(name,'ws-')`; every MultiDatastream when absent
+* `--input-header <NAME: VALUE>` — Extra HTTP header sent when fetching a remote input, written as `Name: Value`; repeat for several. Typically carries an API key, e.g. `--input-header "X-Api-Key: <key>"`. Refused for a local input
+
+
+
+## `cassiopeia sensorthings cursor`
+
+Inspect and reset the cursors of incremental reads
+
+**Usage:** `cassiopeia sensorthings cursor <COMMAND>`
+
+###### **Subcommands:**
+
+* `list` — List the SensorThings cursors in the cursors folder
+* `show` — Show the position a cursor keeps for each data stream and each Thing
+* `reset` — Reset a cursor, so the next cycle reads its data streams and Things again from a chosen point
+
+
+
+## `cassiopeia sensorthings cursor list`
+
+List the SensorThings cursors in the cursors folder.
+
+Prints one row per cursor: its name, the service root its positions were read from, the number of data streams it holds a position for, and the oldest and newest of their high-water marks, `-` for a cursor without positions. A cursor of another kind of input is left out.
+
+**Usage:** `cassiopeia sensorthings cursor list`
+
+
+
+## `cassiopeia sensorthings cursor show`
+
+Show the position a cursor keeps for each data stream and each Thing.
+
+Prints the service root, then one row per position, Datastreams first, then MultiDatastreams, then Things: its kind, `datastream`, `multi-datastream` or `thing`, its id, its high-water mark, the number of Observations or HistoricalLocations it has seen within the lookback, the start of the last cycle that listed it, and the start of the first cycle that no longer listed it, `-` while it is listed.
+
+**Usage:** `cassiopeia sensorthings cursor show <CURSOR>`
+
+###### **Arguments:**
+
+* `<CURSOR>` — The cursor, as an input's `read.incremental.cursor` names it, such as `rivm-air`
+
+
+
+## `cassiopeia sensorthings cursor reset`
+
+Reset a cursor, so the next cycle reads its data streams and Things again from a chosen point.
+
+Without `--to`, removes the positions, so the next cycle starts each data stream and Thing at the input's `initial` point. With `--to`, sets their high-water marks to the target and forgets the Observations and HistoricalLocations they have seen, so the next cycle reads each from the target minus the lookback.
+
+**Usage:** `cassiopeia sensorthings cursor reset [OPTIONS] <CURSOR>`
+
+###### **Arguments:**
+
+* `<CURSOR>` — The cursor, as an input's `read.incremental.cursor` names it, such as `rivm-air`
+
+###### **Options:**
+
+* `--datastream <ID>` — Reset only the Datastream with this id, as `cursor show` prints it; every data stream and Thing when none of this, `--multi-datastream` and `--thing` is given
+* `--multi-datastream <ID>` — Reset only the MultiDatastream with this id, as `cursor show` prints it. A Datastream with the same id keeps its position
+* `--thing <ID>` — Reset only the position of the HistoricalLocations of the Thing with this id, as `cursor show` prints it. The data streams of the Thing keep theirs
+* `--to <INSTANT|DURATION>` — Set the high-water marks to this RFC 3339 instant, or to this span before now, such as `1h`; remove the positions when absent. A target after now is refused
 
 
 

@@ -81,15 +81,15 @@ Produce it with Cassiopeia: `type: "Relationship"` with a `target.entity`; see t
 
 A `ListRelationship` links one entity to many others through one attribute (ETSI GS CIM 009 v1.9.1 clause 4.5.22). It carries an ordered `objectList` of URIs and may include one shared `objectType`. It represents one ordered collection of links, rather than several separate relationship instances. Like the other Property and Relationship types, it can be used as a dataset-specific instance with `datasetId`. It may also carry nested sub-attributes that qualify the list as a whole (clause 4.5.2.2), as [example 30](../../examples/30-csv-nested-relationship/index.md) shows with a `castSize` property on a movie's `hasCast` list relationship.
 
-Its value member is `objectList`. From the `Flight` of [example 12](../../examples/12-csv-list-relationship/index.md), a route's link to every aircraft model that flies it:
+Its value member is `objectList`. In the normalized representation, each element is an object whose single `object` member holds one target URI (clause 4.5.22.2). The concise representation may write each element as the bare URI string instead (clause 4.5.22.3), and Cassiopeia does so. From the `Flight` of [example 12](../../examples/12-csv-list-relationship/index.md), a route's link to every aircraft model that flies it, in the normalized representation:
 
 ```json
 "hasAircraftModel": {
     "type": "ListRelationship",
     "objectList": [
-        "urn:ngsi-ld:AircraftModel:773",
-        "urn:ngsi-ld:AircraftModel:320",
-        "urn:ngsi-ld:AircraftModel:330"
+        { "object": "urn:ngsi-ld:AircraftModel:773" },
+        { "object": "urn:ngsi-ld:AircraftModel:320" },
+        { "object": "urn:ngsi-ld:AircraftModel:330" }
     ],
     "objectType": "AircraftModel"
 }
@@ -251,7 +251,7 @@ Its value member is `json`. In the `WeatherAlert` from [example 25](../../exampl
 
 **When to use it.** Use a `JsonProperty` when a value changes shape between records or is an opaque document that the consumer parses. Prefer real attributes, a nested `Property` built with `mappings`, or top-level attributes when the structure is stable and should be queried. The inner keys of a `JsonProperty` are not NGSI-LD attributes and cannot be targeted by NGSI-LD queries. A custom JSON Schema can still validate the raw JSON when that is useful.
 
-Produce it with Cassiopeia: `type: "JsonProperty"` with no transformation; see the [mapping guide](../../guides/mapping.md#listproperty-and-jsonproperty). Without a transformation, the value is kept exactly as the source holds it, so an object field stays an object and an array field stays an array. Text is not parsed without a transformation, so read a field that holds JSON text, such as any CSV field, with `transformation: "json"`, which keeps any `null` the text holds. A transformation you write still applies as written: `object` keeps a non-empty object, read from its JSON text too, and drops anything else with a warning, and `string` writes the value as compact JSON text.
+Produce it with Cassiopeia: `type: "JsonProperty"` with no transformation; see the [mapping guide](../../guides/mapping.md#listproperty-and-jsonproperty). Without a transformation, the type reads its source as `transformation: "json"` does: a field that holds JSON text, such as any CSV field, becomes the JSON it encodes, keeping any `null` the text holds, and an object field stays an object and an array field stays an array. A transformation you write still applies as written: `object` keeps an object, an empty one included, read from its JSON text too, and drops anything else with a warning, and `array` gathers the source values into one array, which has to hold only objects. Any other transformation is rejected when the mapping loads.
 
 ## Attribute metadata
 
@@ -301,11 +301,13 @@ Within one mapping, the member follows the record Cassiopeia keeps for the entit
 
 ### unitCode
 
-`unitCode` records the unit of a `Property` value, and it is valid only on `Property`. The value is a UN/CEFACT Common Code, not the printed unit symbol: `CEL` means degree Celsius, `MTS` metre per second, and `A97` hectopascal. The temperature in example 14 carries `"unitCode": "CEL"`. When a unit has no Common Code, Cassiopeia leaves `unitCode` out instead of inventing one. [Example 20](../../examples/20-csv-at-context/index.md) uses that rule for radius in Earth radii.
+`unitCode` records the unit of a `Property` value, and it is valid only on `Property`. The value is a UN/CEFACT Common Code, not the printed unit symbol: `CEL` means degree Celsius, `MTS` metre per second, and `A97` hectopascal. The temperature in example 14 carries `"unitCode": "CEL"`. When a unit has no Common Code, Cassiopeia leaves `unitCode` out instead of inventing one. A mapping that gives `unitCode` any other text, such as the symbol `ug/m3`, gets the attribute without `unitCode` and a `transform-unit-code-unknown` warning; the [`cefact_unit`](../../guides/templates.md#unit-codes) filter translates such a notation into its code. [Example 20](../../examples/20-csv-at-context/index.md) uses that rule for radius in Earth radii.
 
 ### datasetId and multi-attributes
 
 `datasetId` identifies one instance when an attribute name carries several values (ETSI GS CIM 009 v1.9.1 clause 4.5.5). A _multi-attribute_ is serialized as a JSON array of attribute objects, with each instance identified by its own `datasetId`. At most one instance may omit `datasetId`; that is the default instance. The rule applies to Property and Relationship attributes, including specialized types such as `ListProperty` and `ListRelationship`.
+
+Clause 4.5.5.1 types `datasetId` as a URI, or the JSON-LD keyword `@none`, which names the default instance. Cassiopeia writes any absolute URI as it is, a URN or not, so `https://example.org/datasets/gfs` is as valid as `urn:ngsi-ld:Dataset:gfs`; a URN is written in its normal form, with the `urn:` prefix and namespace identifier lowercased. A `datasetId` of `@none`, or one that resolves to nothing, gives the default instance, written without `datasetId`. Any other value, such as `gfs model` or the relative reference `datasets/gfs`, is no URI. Written without it, the instance would silently become the default one, so Cassiopeia drops the instance, or the attribute when it has only one, and warns under `extractor-dataset-id-not-a-uri`.
 
 From the `WeatherForecast` of [example 21](../../examples/21-json-dataset-id/index.md), one forecast variable carrying one instance per numerical model:
 

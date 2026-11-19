@@ -2,7 +2,7 @@
 title: "Tera templates and filters"
 sidebar_label: "Templates"
 description: "The Tera syntax available to a mapping's source expressions, with every Cassiopeia filter and function, from string handling to geometry."
-keywords: ["Tera", "template", "filters", "functions", "source expression", "JSON5"]
+keywords: ["Tera", "template", "filters", "functions", "source expression", "JSON5", "cefact_unit", "unit codes"]
 ---
 # Templates
 
@@ -84,7 +84,7 @@ This is how a text source such as CSV builds a list value from one cell:
 
 With `transformation: "array"`, a cell holding `BS IN` becomes `["BS", "IN"]`. A cell holding the JSON text `["BS","IN"]` needs no template at all: `array` reads JSON text as the array it encodes, so `{{ this[2] }}` gives the same result.
 
-The attribute's `transformation` still applies to the value. When none is named, the attribute's type picks the default. On a `Property`, and on every type except `GeoProperty`, `ListProperty`, and `JsonProperty`, the default is `string`: a number becomes its text and an array or object becomes its compact JSON text, so `{{ this[2] | split(pat=' ') }}` with no transformation gives the string `["BS","IN"]`. To keep the type, name it: `integer` or `float` for a number, `boolean` for a boolean, `array` for an array, `object` for an object, or a geometry transformation such as `point` for a geometry. A `GeoProperty` defaults to `geometry`, a `ListProperty` to `array`, and a `JsonProperty` keeps the value as it is, so none of them needs a transformation to keep a geometry, a list, or a structured value. A `GeoProperty` takes only a geometry transformation: any other is rejected when the mapping loads. Every transformation reads its type from text: `integer` turns `"12"` into `12`, `array` and `object` read JSON text as the array or object it encodes, `json` reads JSON text as whatever value it encodes, and the geometry transformations read a GeoJSON geometry written as JSON text. So a CSV cell holding JSON needs no `json_decode`. Only a `JsonProperty` with no transformation keeps text as text, which its `json` member refuses; name `transformation: "json"` to read it.
+The attribute's `transformation` still applies to the value. When none is named, the attribute's type picks the default. On a `Property`, the default is `string`: a number becomes its text and an array or object becomes its compact JSON text, so `{{ this[2] | split(pat=' ') }}` with no transformation gives the string `["BS","IN"]`. To keep the type, name it: `integer` or `float` for a number, `boolean` for a boolean, `array` for an array, `object` for an object, or a geometry transformation such as `point` for a geometry. A `GeoProperty` defaults to `geometry`, a `ListProperty` to `array`, and a `JsonProperty` to `json`, so none of them needs a transformation to keep a geometry, a list, or a structured value; [Convert values](./mapping.md#convert-values) lists the default of every type. A `GeoProperty` takes only a geometry transformation: any other is rejected when the mapping loads. Every transformation reads its type from text: `integer` turns `"12"` into `12`, `array` and `object` read JSON text as the array or object it encodes, `json` reads JSON text as whatever value it encodes, and the geometry transformations read a GeoJSON geometry written as JSON text. So a CSV cell holding JSON needs no `json_decode`, and a `JsonProperty` reads one with no transformation at all, since its default is `json`.
 
 The expression may sit behind `{% if %}`, `{% elif %}`, `{% else %}`, and `{% set %}` tags and `{# #}` comments, with only whitespace around them, as long as the template holds one `{{ }}` in total. A condition that skips the expression gives no value, so the attribute is omitted:
 
@@ -115,10 +115,28 @@ Cassiopeia adds these filters to the built-in set.
 
 | Filter | Effect |
 | --- | --- |
+| `cefact_unit` | Translate a unit notation into the UN/CEFACT code that `unitCode` holds. `unitCode: { source: "{{ unit \| cefact_unit }}" }`. A text such as `µg/m³`, `ug/m3`, `https://qudt.org/vocab/unit/MicroGM-PER-M3`, or `microgram per cubic metre` becomes `GQ`. A SensorThings `unitOfMeasurement` object is read through its `definition`, then its `symbol`, then its `name`, and the first that resolves gives the code. A text that resolves to no code is written unchanged, and so is an object's `symbol`, else its `name`, else its `definition`, when none of them resolves. Null yields nothing. A number, boolean, or array fails the template. See [Unit codes](#unit-codes). |
 | `clean` | Fold every run of whitespace to a single space and trim the ends. `{{ name \| clean }}`. |
 | `get(key=..., default=...)` | Read `key` from a map value. It returns the entry, `default` if given, or nothing when the key is absent. Unlike Tera's built-in `get`, a missing key does not cause an error. |
-| `json_decode` | Parse a JSON string into a structured value the template can index and iterate, the decode counterpart of `json_encode`. `{{ cast \| json_decode \| first \| get(key='id') }}`. As the whole expression, it gives the decoded value itself, which `transformation: "object"` or `"array"` keeps, as do a `ListProperty` and a `JsonProperty` with no transformation. To read a whole field that holds JSON text, name the `json`, `object`, or `array` transformation instead. A non-string passes through unchanged, and empty text yields nothing. A non-empty, malformed string fails the template, so the attribute is dropped with a warning. |
+| `json_decode` | Parse a JSON string into a structured value the template can index and iterate, the decode counterpart of `json_encode`. `{{ cast \| json_decode \| first \| get(key='id') }}`. As the whole expression, it gives the decoded value itself, which `transformation: "object"` or `"array"` keeps, as do a `ListProperty` and a `JsonProperty` with no transformation. To read a whole field that holds JSON text, name the `json`, `object`, or `array` transformation instead, or declare a `JsonProperty`, which reads it with none. A non-string passes through unchanged, and empty text yields nothing. A non-empty, malformed string fails the template, so the attribute is dropped with a warning. |
 | `date_subtract_seconds(seconds=..., format=...)` | Shift a timestamp backwards by `seconds` and format it. `seconds` defaults to 0, and `format` defaults to `%Y-%m-%dT%H:%M:%SZ`. The input may be an epoch number or a textual date-time. |
+
+### Unit codes
+
+NGSI-LD records the unit of a `Property` value as a UN/CEFACT Recommendation No. 20 common code in `unitCode` (ETSI GS CIM 009 v1.9.1 clause 4.5.2): `GQ` for microgram per cubic metre, `CEL` for degree Celsius. Sources rarely send one, so `cefact_unit` reads the notation a source does send and tries it, in order, as:
+
+1. a QUDT unit IRI, over `http` or `https`, with or without a trailing `/`;
+2. a symbol, UCUM code, or UDUNITS code, such as `µg/m³`, `ug.m-3`, or `degC`;
+3. a unit name, such as `microgram per cubic metre` or `Degree Celsius`;
+4. a Recommendation No. 20 code, such as `GQ`.
+
+Symbols and codes are case-sensitive, since `Mm` is the megametre and `mm` the millimetre. Spellings that differ only in characters with no meaning of their own are one notation: the micro sign, the Greek mu, and the `u` UCUM writes; `m³`, `m^3`, and `m3`; a middle dot and the `.` UCUM multiplies with. Names ignore ASCII case, and surrounding whitespace is ignored.
+
+The notations come from Recommendation No. 20 itself, which gives a name to every code and a symbol to most, and from the QUDT unit vocabulary, which gives the IRI, symbols, UCUM and UDUNITS codes, and English labels of each unit that carries a Recommendation No. 20 code. Where QUDT gives a unit the code of a different unit, Cassiopeia reads it with the right code or with none. A notation that names more than one unit in common use, such as `kt` (knot or kilotonne) or `st` (stere or stone), resolves to no code rather than to a guess. A code current in the latest revision of Recommendation No. 20 is preferred. A deprecated code, which the recommendation still lists but not for new data, is written only for a unit that has no current code, such as the hectare (`HAR`) or the millimetre of mercury (`HN`). A deleted code is never written.
+
+A notation that resolves to no code reaches `unitCode` unchanged. It is no code there either, so the attribute is written without `unitCode`, and the run warns under the `transform-unit-code-unknown` code, naming the attribute and the text.
+
+`cassiopeia sensorthings readings` shows the code the filter gives each unit a SensorThings server uses, before a mapping is written (see [Listing a server's readings](./source-formats.md#listing-a-servers-readings)).
 
 ### Math filters
 
@@ -244,7 +262,7 @@ A nested field is named by its path, down to the first part the record does not 
 
 Any other failure reads `` `…` failed to render ``. Run with `-v` to see Tera's reason and how many entities lost the attribute. The run summary counts these warnings under `extractor-template-unresolvable`.
 
-A relationship's `source`, or the identity of the synthetic entity it declares, that fails for a record costs only that link and that synthetic entity. The entity is still written, and the warning is counted under `expander-relationship-unresolvable`. A template that names the entity itself fails differently: there is no entity without an ID, so when `identity.entityName` or a `scope` template fails for a record, Cassiopeia skips the whole record with a warning, counted under `expander-urn-ungeneratable`. An entity `expiresAt` template that fails skips the record the same way, counted under `expander-expires-at-unresolvable`.
+A relationship's `source`, or the identity of the synthetic entity it declares, that fails for a record costs only that link and that synthetic entity. The entity is still written, and the warning is counted under `expander-relationship-unresolvable`. A template that names the entity itself fails differently: there is no entity without an ID, so when `identity.entityName` or a `scope` template fails for a record, Cassiopeia does not write that entity and warns, counted under `expander-id-unresolvable` for the identity and `expander-scope-unresolvable` for the scope. An entity `expiresAt` template that fails keeps the entity from being written the same way, counted under `expander-expires-at-unresolvable`. Such a failure costs only the entity whose template failed. The other entities of the record, the main entity or the synthetic entities it declares, are still written, and a link to an entity that is not written is left out. When the main entity is not written, a synthetic entity's identity or relationship `source` that fails has no link to cost, so it keeps that synthetic entity from being written under `expander-id-unresolvable`. See [Emit a related entity](./mapping.md#emit-a-related-entity).
 
 To keep a field that can be absent from failing the template, guard it or give it a default:
 
