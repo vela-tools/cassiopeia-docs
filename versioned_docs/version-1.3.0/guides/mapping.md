@@ -1,0 +1,707 @@
+---
+title: "Write an NGSI-LD mapping"
+sidebar_label: "Write a mapping"
+description: "Turn a source record into an entity: identity, attributes, transformations, nested values, relationships, metadata, and synthetic entities."
+keywords: ["mapping", "JSON5", "entity identity", "attributes", "relationships", "synthetic entities", "transformations", "expiresAt", "datatype"]
+---
+# Write a mapping
+
+A mapping answers one question: what should one input record become? It is a JSON5-compatible document that names the target entity type, derives an entity ID, and turns record values into NGSI-LD attributes.
+
+A mapping does not describe where the input comes from or where the output goes. Run one directly from the command line, or put it in a manifest when you want to repeat or schedule the work. The manifest is optional, but it packages the mapping with its inputs and run settings.
+
+## Start with the result
+
+Suppose a source produces records with this shape:
+
+~~~json
+{
+    "id": 7,
+    "name": "Main station",
+    "temperature": "21.5"
+}
+~~~
+
+The smallest useful mapping for that record is:
+
+~~~json5
+{
+    version: "v4",
+    dataModel: "Sensor",
+    identity: {
+        entityName: "Station-{{ id }}",
+    },
+    attributes: {
+        name: {
+            source: "{{ name }}",
+        },
+        temperature: {
+            source: "{{ temperature }}",
+            transformation: "float",
+        },
+    },
+}
+~~~
+
+The mapping creates a `Sensor` entity with an ID based on the record's `id` field. It copies `name` as an attribute and converts `temperature` from text to a number.
+
+Cassiopeia applies the mapping once to each record. If the source contains several records, it resolves the resulting fragments into entities.
+
+## The document shape
+
+JSON5 is the recommended format for mapping files. It keeps configuration documents readable. Comments can explain an unusual source field or modeling decision, trailing commas make edits and diffs less error-prone, and unquoted keys reduce visual noise. Cassiopeia also accepts strict JSON because JSON is a valid subset of JSON5. Use the `.json5` extension for mappings that use JSON5 features. A strict JSON file can use `.json` when another tool requires it.
+
+Every mapping has four required top-level parts:
+
+~~~json5
+{
+    version: "v4",
+    dataModel: "Sensor",
+    identity: {
+        entityName: "Station-{{ id }}",
+    },
+    attributes: {
+        // Attribute declarations go here.
+    },
+}
+~~~
+
+`version` identifies the mapping syntax. Cassiopeia currently accepts `v4`.
+
+`dataModel` names the entity type the mapping produces. It can be an unqualified model name such as `Sensor` or a repository-qualified name such as `dataModel.OCF/Sensor`. A qualified name lets Cassiopeia find a published Smart Data Model's schema. An unqualified name declares a custom model without such a lookup. The [data-model guide](./data-models.md) explains how to choose between a published model and one of your own.
+
+`identity` tells Cassiopeia how to build the entity ID.
+
+`scope` is optional and places the entity in one or more NGSI-LD scopes.
+
+`attributes` is an object whose keys are the names of the attributes in the output entity. Each value is an attribute declaration.
+
+Input paths, output destinations, validation policy, and schedules do not belong in this document. Set them on the command line or in a manifest.
+
+Cassiopeia rejects a mapping with any other top-level key, so a misspelled or misplaced key fails when the mapping loads instead of being silently ignored. The same rule applies inside a [`syntheticEntity`](#emit-a-related-entity) body.
+
+## Choose the entity identity
+
+The `entityName` field is required. Its value can be a literal, a source field, or a template built from several parts:
+
+~~~json5
+identity: {
+    entityName: "Station-{{ station_id }}",
+}
+~~~
+
+For a record whose `station_id` is `A-17`, Cassiopeia builds an ID from `Station-A-17` and the mapping's entity type.
+
+An identity that resolves to nothing names no entity, so Cassiopeia skips the record and counts an `expander-urn-ungeneratable` warning. The identity resolves to nothing when:
+
+- a plain reference such as `{{ station_id }}` reads a field that is missing, null, or empty;
+- a template of literal text and plain references, such as `Station-{{ station_id }}`, reads any field that is missing, null, or empty, so the record is skipped instead of becoming `Station-null`;
+- a guarded template such as `{% if station_id %}{{ station_id }}{% endif %}` renders nothing;
+- the text has no letter or digit left once Cassiopeia cleans it into an ID, such as `-`, `—`, or `!?`.
+
+An identity template that fails to render, such as a filter over a missing field, also skips the record. The warning names `identity.entityName` and says how to guard or default the field. See [When a template fails](./templates.md#when-a-template-fails).
+
+The identity should describe the thing represented by the entity. Use a stable source identifier when the source has one. Avoid using a changing measurement as the identity unless each measurement represents a different entity.
+
+## Assign scopes
+
+A scope puts the entity into a hierarchy, such as a location or an organization, that consumers can filter on with `scopeQ`. Declare it at the top level of the mapping, next to `identity`:
+
+~~~json5
+identity: {
+    entityName: "Station-{{ station_id }}",
+},
+scope: "/{{ city }}",
+~~~
+
+For multiple scopes, use an array of templates:
+
+~~~json5
+identity: {
+    entityName: "Station-{{ station_id }}",
+},
+scope: [
+    "/{{ country }}",
+    "/{{ city }}",
+],
+~~~
+
+When the number of scopes varies from record to record, read a field that holds a list of them. A template that reads a list whole, such as `scope: "{{ areas }}"` over `"areas": ["/Ljubljana", "/Ljubljana/Center"]`, gives one scope per item, so the entity is written with `"scope": ["/Ljubljana", "/Ljubljana/Center"]`. Such a template can also be one entry of a `scope` array, and its items join the scopes of the other entries. A filter whose output is a list, such as `{{ areas | reverse }}`, works the same way. Each item is checked as a scope on its own. A null or empty item gives no scope, and so does an empty list. An item that is not text, such as a number, skips the record with an `expander-urn-ungeneratable` warning that names the item's position, counted from 1, and what it holds. An item that is not a legal scope skips the record with a warning that quotes that item alone.
+
+Scope is not part of the entity's identity. NGSI-LD identifies an entity by its ID alone, and a scope can be changed after the entity is created, so `scope` does not belong inside `identity`. Cassiopeia rejects a mapping that declares it there.
+
+Migrating from v1.0.3: a mapping that declares `identity.scope` no longer loads. Move the value unchanged to a top-level `scope` key.
+
+Each scope is one or more `/`-separated levels, and the leading `/` is optional. A level starts with a Unicode letter and continues with Unicode letters, numbers, or underscores, so `/Ljubljana/Šiška`, `/LevelⅫ`, and `/Half½` are valid (ETSI GS CIM 009 v1.9.1 clause 4.18). A combining mark is neither a letter nor a number, so a level whose script needs one, such as Devanagari, or a letter written in decomposed form, is not allowed. Spaces and hyphens are not allowed, so a field holding `Novo mesto` cannot become a level as it is. The NGSI-LD Null, `urn:ngsi-ld:null`, is not allowed either: the specification admits it only to mark a deleted scope (ETSI GS CIM 009 v1.9.1 clause 4.18), and Cassiopeia writes entities, it never deletes a scope. When a resolved scope does not follow this form, or is the NGSI-LD Null, Cassiopeia skips the record and counts an `expander-urn-ungeneratable` warning that quotes the rejected scope. The rest of the run continues. A synthetic entity's scope is checked the same way, and a bad one skips the whole record, the main entity included. A scope written as literal text, with no template in it, resolves the same for every record, so a literal that breaks these rules, such as `"urn:ngsi-ld:null"` or `"/Novo mesto"`, stops the mapping from loading instead, naming the mapping file and the reason.
+
+Cassiopeia resolves scopes per record. A scope of literal text and plain references, such as `/{{ country }}/{{ city }}`, follows the rule for every such template: if any field it reads is missing, null, or empty, it resolves to nothing (see [Source values](#source-values)), so that scope is left out rather than written as a partial path. With the array above, a record that has a `country` but no `city` gets only its country scope, not an extra `/null`, and `/{{ country }}/{{ city }}` never produces `/Slovenia/null`. A field read as the whole scope, as in `{{ indoor }}`, must hold text or a list of scopes: a boolean, a number, or an object skips the record with an `expander-urn-ungeneratable` warning that names the field and what it holds, because its JSON rendering, such as `true`, is no scope the data meant. A boolean, an array, or an object printed into a longer scope, as in `/Sensors/{{ indoor }}`, skips the record the same way. A number printed into a level, as in `/Floor{{ floor }}`, is kept. A scope that uses a filter and whose whole output is one value, such as `{{ floor + 1 }}`, must resolve to text or a list of scopes too. A scope that uses a filter or a tag goes through Tera and is judged by its output alone: an empty output is left out, so keep the whole path inside the guard, as in `{% if city %}/{{ city }}{% endif %}`. A Tera scope that fails to render skips the record with a warning. A record for which no scope resolves gets no `scope` at all.
+
+When several mappings, or several records, contribute to the same entity, the entity receives every distinct scope any of them declared, as NGSI-LD requires when representations of one entity are combined. Duplicates are dropped and the scopes are written sorted by Unicode code point, so the output is the same on every run. An entity with one scope has a string `scope`; an entity with several has an array.
+
+## Set an expiry
+
+An `expiresAt` on the entity itself marks the instant after which the entity ceases to hold (ETSI GS CIM 009 v1.9.1 clause 4.22, written as an optional entity member per clause 4.5.1; the value is an NGSI-LD `DateTime`, clause 4.6.3). Declare it at the top level of the mapping, next to `identity`, reading the source field that says when the record lapses:
+
+~~~json5
+identity: {
+    entityName: "Ticket-{{ ticket_id }}",
+},
+expiresAt: "{{ valid_until }}",
+~~~
+
+The template resolves per record. Its value follows the same rules as a `datetime` transformation: see [Convert values](#convert-values) for the spellings Cassiopeia reads, including RFC 3339 text, space-separated stamps, and Unix epochs written as a number or as text. A template of literal text and plain references that reads a missing, null, or empty field resolves to nothing (see [Source values](#source-values)), so the entity carries no `expiresAt` and the run stays quiet: an absent expiry is one the record does not declare. Text that is present but reads as no instant costs the entity its expiry without failing the record; the entity is still published, and the run warns once per entity type under the `expander-expires-at-unreadable` code, naming the first entity that lost its expiry, the text it could not read, and how many records did. A template that fails to render, such as `{{ valid_until + 1 }}` over a record without `valid_until`, is different: the expiry is resolved before the entity is built, so Cassiopeia skips the whole record with an `expander-expires-at-unresolvable` warning.
+
+Like `scope`, the expiry is an entity member, not part of the entity's identity, so it does not belong inside `identity`: a mapping that declares `identity.expiresAt` does not load. And like `scope`, it is merged when several records contribute to the same entity, but by the rules for the stored record rather than by a union, because `expiresAt` says when the stored entity is to be deleted (ETSI GS CIM 009 v1.9.1 clause 4.22). Within one mapping, the expiry follows the record Cassiopeia keeps: when a temporal mapping's newer observation replaces an older one, its expiry replaces the older expiry too, a shorter one or none at all; when a static mapping's records are merged, a later record that declares an expiry overrides the earlier one, and a record that declares none clears nothing. When a run keeps the whole series instead, each mapping keeps the expiry furthest in the future among its observations. Across the mappings that contribute to one entity, the expiries are joined as clause 4.5.5.3 joins several versions of one entity: if any mapping contributes no expiry the entity has none, because expiring it would delete that mapping's data too, and otherwise the instant furthest in the future wins. The member is written in the normalized and concise representations; the simplified representation leaves it out, as it leaves out `scope`, because clause 4.5.4 admits only `@context`, `id`, `type`, and the attributes there.
+
+An entity `expiresAt` does not make the entity temporal. Temporality is declared by an attribute's `observedAt` (ETSI GS CIM 009 v1.9.1 clause 4.8), which is what turns current-state entities into a kept series; an expiry only bounds how long each state holds, so a mapping that declares only `expiresAt` still produces current-state entities that overwrite one another.
+
+## Map an attribute
+
+An attribute declaration normally starts with a `source` field:
+
+~~~json5
+attributes: {
+    name: {
+        source: "{{ name }}",
+    },
+    capacity: {
+        source: "{{ capacity }}",
+        transformation: "integer",
+    },
+}
+~~~
+
+The key on the left, such as `name` or `capacity`, becomes the NGSI-LD attribute name. The `source` expression tells Cassiopeia where the value comes from. The optional `transformation` converts it before Cassiopeia builds the entity.
+
+In mapping syntax, an attribute without `type` is a `Property`. Set `type` explicitly for a relationship, geometry, language map, vocabulary, list, or JSON property.
+
+### Source values
+
+A source can be a literal:
+
+~~~json5
+source: "Ljubljana"
+~~~
+
+It can refer to a field in the current record:
+
+~~~json5
+source: "{{ name }}"
+~~~
+
+It can follow a path through nested objects:
+
+~~~json5
+source: "{{ properties.name }}"
+~~~
+
+A plain reference accepts names in any script, so `{{ čas }}` and `{{ ulica.številka }}` read those fields directly. For a field name that is not an identifier, such as one with a space, a hyphen, or parentheses, use bracket notation through `this`:
+
+~~~json5
+source: "{{ this['CO(GT)'] }}"
+~~~
+
+A field named `station-id` is read as `{{ this['station-id'] }}`. Written as `{{ station-id }}`, it is rejected when the mapping loads, because Tera would read it as a subtraction. Inside a Tera expression, which is anything more than a plain reference, Tera reads only ASCII names, so a filter over `čas` needs bracket notation too: `{{ this['čas'] | upper }}`.
+
+The special `{{ context }}` expression resolves to the complete current record. Use it when a transformation needs the whole source object, such as when passing an already structured geometry or JSON value through a mapping. It has this meaning only as the whole of a single `source` string, however it is spaced inside the braces.
+
+You can provide several source parts as an array:
+
+~~~json5
+source: [
+    "{{ street }}",
+    " ",
+    "{{ house_number }}",
+],
+transformation: "string",
+~~~
+
+For a text transformation, Cassiopeia concatenates the resolved parts in order. Include separators such as a space in the source array when needed. A part that resolves to nothing is left out and the other parts are still joined, so a record with no `street` gets its house number with the space still in front of it. When none of the fields the parts read is present, the source resolves to nothing, whatever text its literal parts hold: a record with neither `street` nor `house_number` gets no attribute rather than a lone space, and `["Station-", "{{ code }}"]` over a record with no `code` gets no attribute rather than `Station-`. A source made only of literal parts reads no field and always writes its text. When the value should exist only if every field is present, write one template instead, as described next.
+
+A plain reference to a missing or null field resolves to nothing. So does a template of literal text and plain references, such as `{{ street }} {{ house_number }}`, when any field it reads is missing, null, or empty: a record with no `house_number` gets no value, not `Main St null`. An attribute whose source resolves to nothing is left out of the entity.
+
+### Templates
+
+Templates can combine literal text and fields:
+
+~~~json5
+source: "{{ street }} {{ house_number }}, {{ city }}"
+~~~
+
+They can also contain conditional expressions:
+
+~~~json5
+source: "{% if status == 'active' %}available{% else %}offline{% endif %}"
+~~~
+
+Filters transform a value inside a template:
+
+~~~json5
+source: "{{ name | clean }}"
+~~~
+
+Use templates for values that depend on the record. A literal is easier to read and less likely to hide a mapping mistake when the value never changes.
+
+A template whose whole output is one `{{ }}` expression, optionally behind `if` or `set` statements and comments, keeps the type of the expression's value, so `{{ codes | split(pat=' ') }}` gives an array. A guard that suppresses the expression gives no value. See [Keep a value's type](./templates.md#keep-a-values-type).
+
+A template that cannot be compiled, such as one with an unclosed `{{` or an unknown filter, stops the mapping from loading (see [Check a mapping](#check-a-mapping)). A template that compiles but fails on one record, such as `{{ name | upper }}` over a record with no `name`, costs only its attribute: Cassiopeia leaves the attribute out, keeps the entity, and counts an `extractor-template-unresolvable` warning that names where the template is declared, an entity it failed for, and how to guard or default the field. A template under an attribute's `properties` that fails this way costs the whole attribute, a relationship included. An `observedAt` template also ranks the records that resolve to one entity, keeping the latest: a record it fails on ranks as carrying no observation time, so another record of the entity that carries one is kept instead, and the discarded record is counted under the same warning. See [When a template fails](./templates.md#when-a-template-fails).
+
+### More filters and functions
+
+Templates support more than plain text. Cassiopeia's `get` reads a map entry, and `date_subtract_seconds` shifts a timestamp. Mathematical functions such as `sqrt`, `hypot`, `bearing`, and `wind_speed` derive quantities from source numbers. `dms_point` and `geohash` build geospatial values. A computation with no finite answer, such as the square root of a negative or an inverse sine out of range, resolves to nothing, and the attribute is left out without a warning. The [template guide](./templates.md) is the full reference for these functions, the surrounding Tera syntax, and the contributed filters and tests Cassiopeia enables.
+
+## Convert values
+
+The transformation determines the value Cassiopeia builds. If you omit it, the attribute's `type` picks the default. A `GeoProperty` defaults to `geometry`, so a GeoJSON geometry read from the source, as an object or as its JSON text, becomes the attribute's geometry (see [GeoProperty](#geoproperty)). A `ListProperty` defaults to `array`, so an array read from the source becomes the list itself. A `JsonProperty` keeps the value exactly as the source holds it, so an object stays an object and an array of objects stays an array (see [ListProperty and JsonProperty](#listproperty-and-jsonproperty)). A `LanguageProperty` read from one `source` defaults to `object`, so an object of text keyed by language tag, or its JSON text, becomes its `languageMap` (see [LanguageProperty](#languageproperty)). A `VocabProperty` defaults to `iri`, so its source becomes the vocabulary IRI in its normal form (see [VocabProperty](#vocabproperty)). A `Property` defaults to `string`: a number becomes its text, and an array or object becomes its compact JSON text, such as `["BS","IN"]`. Write a transformation when the target model expects another type, including `array` or `object` to keep a structured value as it is on a plain `Property`. Each type accepts only the transformations that can produce its value, and a mapping that declares any other is rejected when it loads, naming the attribute and the transformations its type accepts:
+
+| Type | Transformations it accepts |
+| --- | --- |
+| `Property` | Every transformation. |
+| `GeoProperty` | `geometry`, `point`, `multipoint`, `linestring`, `multilinestring`, `polygon`, `multipolygon` (see [GeoProperty](#geoproperty)). |
+| `ListProperty` | Every transformation: `array` keeps the items as read, and any other reads each item (see [ListProperty and JsonProperty](#listproperty-and-jsonproperty)). |
+| `JsonProperty` | `array`, `object`, `json` (see [ListProperty and JsonProperty](#listproperty-and-jsonproperty)). |
+| `LanguageProperty` | `object` for a single `source`; none for a `languageMap`, whose entries accept only `string` (see [LanguageProperty](#languageproperty)). |
+| `VocabProperty` | `iri`, `urn` (see [VocabProperty](#vocabproperty)). |
+| `Relationship`, `ListRelationship` | None: the target entity is built from the `source` and `target` (see [Relationship](#relationship)). |
+
+An attribute built from nested `mappings` accepts only a transformation that can apply to an object (see [Build nested values](#build-nested-values)). The rules hold for a top-level attribute, a sub-attribute, each `languageMap` entry, and an attribute of a synthetic entity alike, and for a mapping saved by the TUI wizard, which offers only the transformations the selected type accepts.
+
+Every transformation reads its type from text, which is how every value arrives from a CSV source: `integer` turns `"12"` into `12`, `array` and `object` read JSON text such as `[1,2]` as the array or object it encodes, and `json` reads JSON text as whatever value it encodes.
+
+| Transformation | Result |
+| --- | --- |
+| `boolean` | A boolean value. `true`, `yes`, `on`, and `1` read as true and `false`, `no`, `off`, and `0` as false, in any case, and a number reads as true unless it is zero. |
+| `integer` | A signed 64-bit integer. A fraction is truncated toward zero, so `"7.9"` becomes `7`. |
+| `float` | A floating-point number. Comma decimal separators are accepted. |
+| `string` | Text. Several source parts are concatenated. A number becomes its text, and an array or object becomes its compact JSON text. |
+| `iri` | An absolute IRI (RFC 3987), read from text without the whitespace around it and written in its normal form: the scheme and host lowercased, percent-encodings in uppercase hex, encoded unreserved characters such as `%7E` decoded, `.` and `..` segments removed, and, for `http` and `https`, the default port dropped and an empty path written as `/`, so `HTTP://Example.org:80` becomes `http://example.org/`. The case of the path, query, and fragment is kept. Several source parts are concatenated first. Text that is no absolute IRI, a relative reference such as `/a/b` included, is dropped and the run warns under `extractor-iri-unreadable`. A null or blank source produces no attribute. On a `Property`, the result is text. |
+| `urn` | A URN (RFC 8141), read from text without the whitespace around it and written in its normal form: the `urn:` prefix and the namespace identifier lowercased and percent-encodings in uppercase hex, while the rest keeps its case, so `URN:NGSI-LD:Building:B-12` becomes `urn:ngsi-ld:Building:B-12`. Several source parts are concatenated first. Text that is no URN is dropped and the run warns under `extractor-urn-unreadable`. A null or blank source produces no attribute. On a `Property`, the result is text. |
+| `array` | An array containing the source parts. A part that is already an array contributes its elements, and so does text that reads as a JSON array, such as `[1,2]`. Any other part contributes itself, so text that is no JSON array, such as `BS IN`, is one element; split it with a template such as `{{ codes \| split(pat=' ') }}` (see [Keep a value's type](./templates.md#keep-a-values-type)). A null or blank part contributes nothing, and so does a blank text element of an array, so `{{ codes \| split(pat=' ') }}` turns `BS  IN` into `["BS", "IN"]` and blank text into no attribute. No elements left means no attribute. On a `Property` or a `ListProperty`, an element that is `null` is left out of the array (see below); on a `JsonProperty`, every element has to be an object. |
+| `object` | The source value when it is a JSON object, or text that reads as one, such as `{"k":1}`. Any other value, such as an array, a number, or text that is not a JSON object, is dropped and the run warns under `extractor-object-misshapen`. A null or blank source produces no attribute. On a `Property`, an empty object produces no attribute either, and a `null` member is left out (see below). On a `JsonProperty`, the object is kept as the source has it, an empty object and every `null` member included. |
+| `json` | The JSON value that text reads as: an object, an array, a number, a boolean, or a string, so `{"no2":3}` becomes an object and `12.5` a number. A value that is not text is kept as it is. Text that is not JSON is dropped and the run warns under `extractor-json-text-unreadable`, and blank text or `null` produces no attribute. On a `Property`, a `null` inside the decoded value is left out (see below). On a `JsonProperty`, the decoded value is its raw `json` member, with any `null` inside it kept (see [ListProperty and JsonProperty](#listproperty-and-jsonproperty)). |
+| `datetime` | A date and time value. |
+| `date` | A date value. |
+| `time` | A time value. |
+| `geometry` | An existing GeoJSON geometry, as an object or as its JSON text, whichever of the six admissible types it is. The default for a `GeoProperty`. On a `GeoProperty`, a `GeometryCollection` is dropped with a warning unless the `geometry` block folds it. On a `Property`, a `GeometryCollection` is kept as its GeoJSON object, each member validated as a geometry of its own (see [GeoProperty](#geoproperty)). |
+| `point` | A GeoJSON `Point`. |
+| `multipoint` | A GeoJSON `MultiPoint`. |
+| `linestring` | A GeoJSON `LineString`. |
+| `multilinestring` | A GeoJSON `MultiLineString`. |
+| `polygon` | A GeoJSON `Polygon`. |
+| `multipolygon` | A GeoJSON `MultiPolygon`. |
+
+`boolean`, `integer`, and `float` read text without the whitespace around it, so a padded CSV cell such as ` 12 ` becomes `12`. A value they cannot read is not dropped quietly: text such as `abc` under `integer` or `maybe` under `boolean`, an array, an object, a number outside the 64-bit range under `integer`, and text such as `NaN` that spells no finite number under `float` cost the attribute, sub-attribute, or instance, and the entity is still written. The run warns under `extractor-boolean-unreadable` or `extractor-number-unreadable`, naming the attribute and the first value it could not read. A missing, null, or blank source produces no attribute and no warning.
+
+NGSI-LD admits no `null` anywhere in an entity's values (ETSI GS CIM 009 v1.9.1 clause 4.5.0): a broker running JSON-LD expansion would delete it without a word (clause 5.2.1). So a `null` nested inside a source array or object is left out of the value Cassiopeia builds. A source array `["a", null, "b"]` becomes `["a", "b"]`, and an object `{"value": 21.5, "unit": null}` under `object` becomes `{"value": 21.5}`. The attribute itself is kept, and the run warns once per attribute under `extractor-null-dropped`, counting the records that lost a `null`. An object or array that holds nothing but `null`, such as `{"maybe": null}` or `[null, null]`, would be written empty, so the attribute is dropped instead, the entity is still written, and the run warns under `extractor-value-only-null`, naming the attribute and the value; those `null`s are not also counted under `extractor-null-dropped`. An empty object `{}` or array `[]` is no value and produces no attribute and no warning. An attribute built from nested `mappings` follows the same rule for the object it assembles: under a `Property`, a `null` a member kept is left out and counted under the attribute. Only a `JsonProperty` keeps such a `null` as the source has it, also when it is built from nested `mappings` (see [ListProperty and JsonProperty](#listproperty-and-jsonproperty)). An empty string is a value, not a `null`, and is written as `""`.
+
+`datetime`, `date`, and `time` read the spellings sources actually write. Supported values include RFC 3339 (`2026-03-01T11:04:35Z`, `2026-03-01T11:04:35+02:00`), the ISO 8601 basic and hour-only offsets after a `T`, as Java's `SimpleDateFormat` writes them (`2026-03-01T11:04:35.000+0200`, `2026-03-01T11:04:35+02`, `20260301T110435+0200`), the same instant with a space instead of the `T` and with or without a UTC offset (`2026-03-01 11:04:35`, `2026-03-01 11:04:35+00:00`, `2026-03-01 11:04:35+0000`), RFC 9557 with a bracketed time zone, as `now()` renders it and Java's `ZonedDateTime` writes it (`2026-03-01T11:04:35+00:00[UTC]`, `2026-03-01T12:04:35+01:00[Europe/Vienna]`, `2026-03-01T12:04:35[Europe/Vienna]`), `Y-m-d` and `d/m/Y` dates with `:` or `.` between the time parts, a bare date, and a Unix epoch in seconds, milliseconds, or nanoseconds, written as a number or as text and with or without a fraction (`1775253620`, `1775253620.5`). A number too small to be an epoch, such as `2026`, is not read and is dropped with a warning. Offsets are applied and every value is converted to UTC. Fractional seconds are kept up to the six digits ETSI GS CIM 009 v1.9.1 clause 4.6.3 admits; further digits are truncated, so a value never moves into the next second, and a value is written at the precision it has (`2026-03-01T11:04:35Z`, `2026-03-01T11:04:35.250Z`, `2026-03-01T11:04:35.712623Z`). A `date` is written as `2026-03-01` and a `time` as `11:04:35Z`, ending with the `Z` clause 4.6.3 requires. The Property carries a `valueType` of `DateTime`, `Date`, or `Time` (clause 4.5.2), so a broker reads the value as a time rather than as text and a query with a time operand matches it; the simplified representation has no place for it and writes the bare value. A declared [`valueType`](#declare-a-values-datatype) replaces it as written, and it has to name the same data type. A bracketed zone without an offset resolves through that zone's rules, daylight saving time included; an offset the bracketed zone contradicts, such as `+02:00[UTC]`, is not read. A space-separated value or a bare date without a zone is read as UTC. A bare year (`2026`), a year and month (`2026-03`), and a date-time with a `T` but no zone (`2026-03-01T11:04:35`) are not read. Unreadable text is not dropped quietly: Cassiopeia omits the attribute and warns with the attribute name and the text it could not read. An `observedAt` or `expiresAt` sub-property follows the same rules, and is written at the same precision. If it cannot be read, the attribute is still published without that qualifier. An `observedAt` template of literal text and plain references that reads a missing field resolves to nothing, so the attribute is published without the qualifier and without a warning.
+
+The transformation and the NGSI-LD attribute type answer different questions. `transformation: "float"` says how to parse the value. `type: "Property"` says how to represent it in the entity. A geometry attribute built from coordinates therefore uses both:
+
+~~~json5
+location: {
+    type: "GeoProperty",
+    source: ["{{ longitude }}", "{{ latitude }}"],
+    transformation: "point",
+}
+~~~
+
+## Use NGSI-LD attribute types
+
+Cassiopeia supports the NGSI-LD attribute types defined by version 1.9.1 of the specification. The `type` field selects the type produced by a mapping. This section shows how to declare each one. The [attribute-type reference](../reference/ngsi-ld/attribute-types.md) provides more detail about each type's canonical payload, value member, and differences from similar types.
+
+### Property
+
+Properties hold values. This is the default mapping type, so ordinary value attributes do not need to declare it:
+
+~~~json5
+temperature: {
+    source: "{{ temperature }}",
+    transformation: "float",
+}
+~~~
+
+### Relationship
+
+A relationship points to another entity. Its `source` supplies the target entity name, and `target.entity` supplies the target model:
+
+~~~json5
+controlledAsset: {
+    type: "Relationship",
+    source: "{{ building_id }}",
+    target: {
+        entity: "Building",
+    },
+}
+~~~
+
+For a record whose `building_id` is `B-12`, this relationship targets the corresponding `Building` entity. Cassiopeia builds the target's identifier from the `source` and `target.entity`, so a relationship takes no `transformation`: a mapping that declares one is rejected when it loads, naming the attribute. Nor can a relationship be built from nested `mappings`. To give one relationship name several targets that differ by role, declare `instances` instead of a single `source`. See [multiple instances](#carry-several-instances-under-one-name) and [example 29](../examples/29-csv-multi-attribute-relationship/index.md). A relationship can also carry its own `properties`, including a nested relationship. See [attribute metadata](#add-attribute-metadata) and [example 30](../examples/30-csv-nested-relationship/index.md).
+
+A `source` that resolves to nothing gives no link, and the entity is still written without it. That covers a plain reference to a missing, null, or empty field, a template such as `B-{{ building_id }}` with any such field, a list-form `source` such as `["B-", "{{ building_id }}"]` with any part that reads such a field, and text with no letter or digit, such as `-`. A `source` template that fails to render, such as `{{ building_id | lower }}` over a null `building_id`, also gives no link and the entity is still written, but the run reports an `expander-relationship-unresolvable` warning that names the relationship and the first entity that lost it. The same holds for each instance of a multi-instance relationship and for a relationship nested under another attribute: only that instance or that nested link is left out. Guard a filtered source, as in `{% if building_id %}{{ building_id | lower }}{% endif %}`, when a missing value is expected.
+
+### GeoProperty
+
+GeoProperties hold GeoJSON geometry. When the source already contains a complete geometry, as an object or as its JSON text, the attribute needs no transformation: a GeoProperty defaults to `geometry`, which keeps whichever of the six admissible types the source carries. Use one of the specific geometry transformations when the source contains coordinates that need to become a particular geometry type, or when the attribute must hold one particular type.
+
+~~~json5
+location: {
+    type: "GeoProperty",
+    source: "{{ geometry }}",
+}
+~~~
+
+A missing, null, or blank field produces no attribute and no warning, and so do coordinate fields that are all null or blank. A value that is there but spells no geometry, such as text that is not GeoJSON, a GeoJSON-shaped object that is not valid such as `{"type":"Point"}` without `coordinates`, or a number, is dropped and the run warns under `extractor-geometry-unreadable`, naming the attribute and the value, the same way unreadable text under `datetime` is. A sub-attribute or instance is dropped on its own, and the attribute that carries it is still written. A transformation you write replaces the default, so on a GeoProperty it has to be one of the geometry transformations: a GeoProperty's value must be a GeoJSON geometry (ETSI GS CIM 009 v1.9.1 clause 4.7.1). A mapping that declares `string`, `integer`, `object`, or any other non-geometry transformation on a GeoProperty is rejected when it loads, naming the attribute and the geometry transformations it accepts. This holds for a top-level attribute, a sub-attribute, and an attribute of a synthetic entity alike. Remove the transformation, since the default `geometry` already reads a GeoJSON object or its JSON text, or name a geometry type such as `point`.
+
+A GeoProperty holds exactly six geometry types, the ones NGSI-LD admits (ETSI GS CIM 009 v1.9.1 clause 4.7): `Point`, `MultiPoint`, `LineString`, `MultiLineString`, `Polygon`, `MultiPolygon`. GeoJSON's seventh type, `GeometryCollection` (RFC 7946 clause 3.1.8), is not one of them. A source that carries one produces no GeoProperty unless the mapping asks for it to be folded, described below. To keep a collection as it is, declare the attribute as a plain `Property` with `transformation: "geometry"`: a Property's value may be any JSON object, so the collection is written as its GeoJSON object, with each member read under the attribute's `geometry` block, so `winding` and `altitude` apply to it and a member that is no valid geometry drops the attribute with a warning. A `convert` strategy or a named geometry type such as `point` reads the collection as a GeoProperty does, so `flatten` still folds it and anything else refuses it.
+
+Every position is checked against WGS 84 when the geometry is read, because GeoJSON coordinates are WGS 84 longitude and latitude in decimal degrees (RFC 7946 section 4). A longitude outside [-180, 180] or a latitude outside [-90, 90], such as `[2600.5, 341870.2]` or `[16.37, 91]`, is refused before any conversion runs: the attribute, sub-attribute, or instance is dropped, the entity is still written, and the run warns under `geometry-coordinates-out-of-range`. The warning names the attribute by its path and the first position it refused, with where it sits in the geometry, such as `coordinates[0][2]`. Such numbers usually mean the source is in a coordinate reference system Cassiopeia was not told about, such as a Shapefile without its `.prj` or a GeoPackage table whose CRS is `undefined`, that longitude and latitude are swapped, or that a conversion or scale went wrong. A GRIB or NetCDF grid stored in the `[0, 360)` longitude convention does not trip this check, because those ingestors fold every longitude into `[-180, 180)` before the mapping reads it. The altitude, a position's optional third element, is not range-checked. This applies to a top-level attribute, a sub-attribute, an instance, and a geometry assembled from nested `mappings` alike.
+
+Cassiopeia normalises every geometry it emits to RFC 7946's producer rules. It closes polygon rings that are not closed and rewinds every ring to the right-hand rule in clause 3.1.6: exterior rings counterclockwise and holes clockwise. A position's optional third element, its altitude (clause 3.1.1), is carried through.
+
+#### Convert between geometry types
+
+The `transformation` names the geometry type the attribute should hold. A GeoProperty without one keeps whatever type the source carries, so a `geometry` block on it applies its conversion to that geometry and nothing more is reconciled. When the source already carries the declared type, or a type that reaches it without discarding anything, the attribute is built and nothing needs to be declared. Three conversions are lossless and therefore automatic:
+
+- **identity**: the source is already the declared type;
+- **promotion**: a `Point` becomes a `MultiPoint`, a `LineString` a `MultiLineString`, and a `Polygon` a `MultiPolygon`;
+- **unwrapping**: a multi-geometry carrying exactly one member becomes that member.
+
+Everything else discards coordinates, and Cassiopeia never discards geometry without the mapping saying so. A `MultiPolygon` of two surfaces asked for a `Polygon` throws one surface away; a `Polygon` asked for a `Point` throws away its whole extent. Those conversions are refused unless a sibling `geometry` block names the loss:
+
+~~~json5
+location: {
+    type: "GeoProperty",
+    transformation: "polygon",
+    geometry: {
+        convert: "largest",
+    },
+    source: "{{ geometry }}",
+}
+~~~
+
+When a conversion is refused, the attribute is dropped, the entity is still written, and the run counts one warning per record and prints one message naming the attribute and the reason. A GeoProperty declared as a sub-attribute under `properties`, one instance of a [multi-instance](#carry-several-instances-under-one-name) GeoProperty, and a GeoProperty assembled field by field from nested `mappings` follow the same rules under their own declaration's `geometry` block. A refused sub-attribute or instance is dropped on its own with the same warning, and the attribute that carries it is still written.
+
+The `geometry` block takes three keys:
+
+| Key | Values | Default |
+| --- | --- | --- |
+| `convert` | one of the conversions below | absent, meaning lossless conversions only |
+| `winding` | `rfc7946`, `keep` | `rfc7946` |
+| `altitude` | `keep`, `drop` | `keep` |
+
+`winding: "keep"` emits rings exactly as the source wound them. `altitude: "drop"` truncates every position to a longitude and a latitude.
+
+#### The conversions
+
+**Pick one member of a multi-geometry**, coordinates untouched:
+
+| `convert` | Effect |
+| --- | --- |
+| `first` | The first member, in coordinate-array order. |
+| `largest` | The member of greatest geodesic area (surfaces) or geodesic length (curves). Not available toward `point` or `multipoint`: a position has no extent to rank by, so a mapping declaring it there is rejected when it loads. |
+
+**Derive a position:**
+
+| `convert` | Effect |
+| --- | --- |
+| `centroid` | The geometry's centroid. May fall outside a concave surface. |
+| `point-on-surface` | A position guaranteed to lie on or inside the geometry. |
+| `first-vertex` | The first position the geometry lists, copied verbatim. |
+| `bbox-center` | The centre of the geometry's bounding box. |
+
+**Derive a curve:**
+
+| `convert` | Effect |
+| --- | --- |
+| `exterior-ring` | A surface's exterior ring as a closed curve, discarding its holes. |
+| `boundary` | A surface's whole boundary, one curve per ring, exterior first. Loses no coordinate. |
+| `connect` | A `MultiPoint`'s positions joined into one curve, in coordinate-array order. |
+
+**Derive a surface:**
+
+| `convert` | Effect |
+| --- | --- |
+| `ring` | A closed curve read as a surface's exterior ring. The curve must already close and hold at least four positions; an open curve is refused, never closed for you. |
+| `convex-hull` | The convex hull of the geometry's positions. |
+| `envelope` | The geometry's bounding box, as a rectangle. |
+
+**Other:**
+
+| `convert` | Effect |
+| --- | --- |
+| `vertices` | Every distinct position the geometry lists, as a `MultiPoint`. A surface contributes all its rings, not only the exterior one. |
+| `flatten` | Folds a `GeometryCollection` into one geometry: a lone member becomes that geometry, members of one dimension become the matching multi-geometry, and a collection mixing dimensions is refused. |
+
+`centroid` and `point-on-surface` are computed in the plane, using longitude and latitude as plane coordinates, so they drift at high latitude and are meaningless across the antimeridian. `largest` and the winding decision are geodesic and have no such caveat. A conversion guarantees the result is a structurally valid RFC 7946 geometry, but not a topologically sensible one. For example, `ring` on a self-intersecting curve yields a valid polygon bounding a nonsensical surface.
+
+Conversions preserve a position's altitude wherever they can: the ones that select or regroup existing positions (`first`, `largest`, `first-vertex`, `exterior-ring`, `boundary`, `connect`, `ring`, `vertices`, `flatten`) carry it through, and the ones that compute new coordinates (`centroid`, `point-on-surface`, `bbox-center`, `convex-hull`, `envelope`) do not.
+
+A conversion that could never produce the declared type is rejected when the mapping loads, naming the attribute, rather than failing on every record. So is a `geometry` block on an attribute whose value is never converted to a geometry, which is any type other than `GeoProperty` without a geometry transformation. The block could never apply there. A `ListProperty` under a geometry transformation applies its `geometry` block to every item.
+
+When a geometry has to be converted inside a template, for a value that a `transformation` cannot reach, use the [`geo_convert` function](./templates.md#geometry-functions).
+
+### LanguageProperty
+
+A LanguageProperty contains one value per language. Declare those values under `languageMap`:
+
+~~~json5
+description: {
+    type: "LanguageProperty",
+    languageMap: {
+        en: {
+            source: "{{ description_en }}",
+        },
+        sl: {
+            source: "{{ description_sl }}",
+        },
+    },
+}
+~~~
+
+The keys under `languageMap` are language tags. Each language entry is an attribute declaration with its own source. An entry is one localized string, so it accepts only `string`, which it uses when it declares no transformation, and the LanguageProperty holding the `languageMap` takes no transformation of its own; a mapping that declares any other is rejected when it loads, naming the attribute. An entry that resolves to nothing or to blank text is left out, and a LanguageProperty with no entry left produces no attribute. Only a LanguageProperty reads a `languageMap`: a mapping that declares one on any other type is rejected when it loads, naming the attribute.
+
+A LanguageProperty declared with a single `source` instead of a `languageMap` reads the whole map from that source: an object of text keyed by language tag, or its JSON text, such as `{"en":"Louvre Museum","fr":"Musée du Louvre"}`. It uses `object` when it declares no transformation, and accepts no other. Only entries keyed by a valid language tag and holding text are kept. A source that is no such object, such as plain text, a number, or text that does not read as an object, and an object with no entry left, are dropped and the run warns under `extractor-language-map-misshapen`, naming the attribute and the value. A missing, null, or blank source produces no attribute and no warning.
+
+### VocabProperty
+
+A VocabProperty stores a vocabulary IRI (ETSI GS CIM 009 v1.9.1 clause 4.5.20). Map the IRI with a source expression and set the type explicitly:
+
+~~~json5
+vehicleType: {
+    type: "VocabProperty",
+    source: "{{ vehicle_type }}",
+}
+~~~
+
+A VocabProperty defaults to `iri`: the resolved source must be an absolute IRI, whitespace around it is ignored, and it is written in its normal form (see the `iri` transformation). A value that is not an IRI is dropped and the run warns under `extractor-iri-unreadable`, naming the attribute and the value. Declare `transformation: "urn"` to admit only a URN, which is written in its normal form and refused under `extractor-urn-unreadable` otherwise. A VocabProperty accepts no other transformation, `string` included, since no other one checks that the value is an IRI. A missing, null, or blank source produces no attribute and no warning. [Example 26](../examples/26-csv-vocab-property/index.md) builds the IRI by interpolating an OpenStreetMap amenity term into its canonical tag-page URL.
+
+### ListProperty and JsonProperty
+
+Use `ListProperty` for an ordered list of values. Use `JsonProperty` for a JSON value that should remain JSON in the NGSI-LD entity:
+
+~~~json5
+supportedModes: {
+    type: "ListProperty",
+    source: "{{ modes }}",
+},
+metadata: {
+    type: "JsonProperty",
+    source: "{{ metadata }}",
+}
+~~~
+
+Neither needs a transformation, because each type's default keeps the structure the source provides. A `ListProperty` defaults to `array`: a source value that is already an array, or text that reads as a JSON array such as `[1,7,15]`, contributes its elements, any other value becomes one element, a blank text element is left out, and a null or blank source produces no attribute. A `JsonProperty` keeps the value exactly as the source holds it, because its `json` member carries raw JSON that NGSI-LD never interprets (ETSI GS CIM 009 v1.9.1 clause 4.5.24.2): an object stays an object and an array of objects stays an array, with any `null` inside them kept. The `json` member is "a raw JSON object (or array of objects)" (clause 4.5.24.2), so a source that is text, a number, a boolean, or an array holding anything but objects is refused: the attribute is dropped and the run warns under `extractor-json-payload-misshapen`. Several source templates on a `JsonProperty` give an array of their values in order, leaving out a template that resolves to null, and a source that resolves to null produces no attribute. Any other transformation on a `ListProperty` says how to read each item: the source is gathered into a list as `array` gathers it, so a value that is no list is its one item, and then every item is read as that transformation reads one value, so `integer` turns `["1","2"]` into `[1, 2]` and `point` turns `[[16.37,48.2],[16.4,48.21]]` into a list of two points. A `null` item is left out and the run warns under `extractor-null-dropped`. A blank text item is left out without a warning, as it is when the list is gathered. An item the transformation cannot read, such as `x` under `integer`, and an item that reads as nothing, such as `{}` or `{"a":null}` under `object`, drop the whole attribute, since a list's order carries meaning and no item may vanish from it unannounced; the entity is still written, and the run warns under the code of what the item had to be, such as `extractor-number-unreadable`, quoting the item. A list built from nested `mappings` holds the one object they build, so it accepts only `string`, `array`, `object`, `json`, and the geometry transformations. A `JsonProperty` accepts `json`, `object`, and `array`, and a mapping that declares any other is rejected when it loads, since none of them produces a JSON object: `json` reads JSON text as the raw JSON it encodes, keeping any `null` inside it, `object` keeps an object as the source has it, an empty object and every `null` member included, and `array` gathers its source values into an array, which then has to hold only objects, so a `null` element is refused under `extractor-json-payload-misshapen`.
+
+A `JsonProperty` with no transformation keeps text as text, and its `json` member refuses text, so a source that carries JSON as text, as every CSV field does, names `transformation: "json"`:
+
+~~~json5
+pollutantIndex: { type: "JsonProperty", source: "{{ indices }}", transformation: "json" },
+nextCountdowns: { type: "ListProperty", source: "{{ countdowns }}" },
+~~~
+
+With `indices` holding `{"no2":3,"pm10":2}` and `countdowns` holding `[1,7,15]`, both as CSV text, this writes `"json": {"no2": 3, "pm10": 2}` and `"valueList": [1, 7, 15]`. Text that is not JSON is dropped under `extractor-json-text-unreadable`, and JSON that is no object or array of objects under `extractor-json-payload-misshapen`. A bare field reference such as `{{ modes }}` resolves to the record's actual value, so an array field stays an array and an object field stays an object. [Example 24](../examples/24-json-list-property/index.md) carries an ordered array as a `ListProperty`, while [example 25](../examples/25-geojson-json-property/index.md) keeps a variable object whole as a `JsonProperty`.
+
+### ListRelationship
+
+ListRelationship represents links to multiple entities of the target model. Use it when the source describes a collection of related entity identifiers. Its target declaration identifies the model of those related entities:
+
+~~~json5
+hasAircraftModel: {
+    type: "ListRelationship",
+    source: "{{ equipment_codes }}",
+    target: {
+        entity: "AircraftModel",
+    },
+}
+~~~
+
+The source is read as a collection of identifiers with no `split`. An array contributes one target per element, while a string contributes one target per whitespace- or comma-separated token. For example, `"744 777"` links to both `AircraftModel:744` and `AircraftModel:777`. A token that names no target, because it has no letter or digit (`-`, `_`, `—`, or only symbols), is skipped, and the other tokens and the entity are kept. A source left with no tokens gives no attribute. A source template that fails to render skips the record, as it does for a Relationship. When several records resolve to the same entity, their targets are joined as a union: each target appears once, in the order it was first read, so three records listing the same lines give those lines once, while two records naming different lines give both. Like a Relationship, a ListRelationship may appear as several `datasetId`-tagged instances under one attribute name. See [multiple instances](#carry-several-instances-under-one-name). It may also carry its own `properties` as sub-attributes that qualify the whole list, as [example 30](../examples/30-csv-nested-relationship/index.md) does with a `castSize` property. [Example 12](../examples/12-csv-list-relationship/index.md) shows a complete case, including the tradeoff against a published model that predates the type.
+
+## Build nested values
+
+Use `mappings` when an attribute contains a structured object whose fields need their own source expressions:
+
+~~~json5
+address: {
+    type: "Property",
+    transformation: "object",
+    mappings: {
+        streetAddress: {
+            source: "{{ street }}",
+        },
+        addressLocality: {
+            source: "{{ city }}",
+        },
+    },
+}
+~~~
+
+Nested declarations follow the same rules as top-level attributes. They can have their own transformations, nested mappings, and metadata.
+
+The object the nested mappings build is converted by the attribute's own `transformation` exactly as a value read from one source is. Without a transformation, the object is kept as it is built, except on a `GeoProperty`, which reads it as the GeoJSON geometry it spells field by field (see [GeoProperty](#geoproperty)). `object` and `json` keep the object, `string` writes its compact JSON text, such as `{"streetAddress":"Ring","addressLocality":"Wien"}`, `array` writes a list holding the object, and a geometry transformation such as `multipoint` reads the object as a geometry and converts it to that type. An object that spells no geometry, such as `{"streetAddress":"Ring"}` under `point`, is dropped and the run warns under `extractor-geometry-unreadable`, naming the attribute and the object. No object is a boolean, a number, or a date and time, so a mapping that declares `boolean`, `integer`, `float`, `datetime`, `date`, or `time` on an attribute with nested `mappings` is rejected when it loads, naming the attribute. No object is a vocabulary IRI or a relationship's target either, so a `VocabProperty`, a `Relationship`, or a `ListRelationship` with nested `mappings` is rejected too. A `LanguageProperty` with nested `mappings` reads the object they build as its `languageMap`, each mapping keyed by a language tag. The attribute's own type decides what happens to a `null` a member keeps, such as a member read with `object` from `{"a": null, "b": 1}`: a `Property` leaves it out and the run warns under `extractor-null-dropped`, naming the attribute that holds the member, and a `JsonProperty` keeps it in its `json` member. A member read as a date and time is written as its text, and a member that is a `GeoProperty` as its GeoJSON object.
+
+Use nested mappings for a known output structure. Use `{{ context }}` with an object transformation when the source already contains the complete object and you do not need to rename or transform its fields individually.
+
+## Add attribute metadata
+
+The `properties` member declares attributes of an attribute. It is different from the top-level `attributes` object:
+
+~~~json5
+temperature: {
+    source: "{{ temperature }}",
+    transformation: "float",
+    properties: {
+        observedAt: {
+            source: "{{ timestamp }}",
+            transformation: "datetime",
+        },
+        unitCode: {
+            source: "CEL",
+        },
+    },
+}
+~~~
+
+`observedAt`, `expiresAt`, `unitCode`, and `datasetId` are handled as NGSI-LD attribute qualifiers. Any other entry under `properties` becomes a nested sub-attribute with the declared `type`, or a `Property` when no type is specified. It can also be a `VocabProperty`, a `LanguageProperty`, a `GeoProperty`, or a `Relationship`. A `GeoProperty` sub-attribute is converted under its own `geometry` block exactly like a top-level one, so `winding: "keep"` keeps its rings as the source wound them, and a geometry it refuses drops only that sub-attribute, with a warning naming it by its path, such as `temperature.footprint`. The same holds for a `VocabProperty` or `LanguageProperty` sub-attribute whose value its type cannot hold: only the sub-attribute is dropped, the attribute carrying it is still written, and the warning names it by its path, such as `temperature.level`. A sub-attribute is the serialization of a Property or any of its subclasses, and of a Relationship (ETSI GS CIM 009 v1.9.1 clause 4.5.2.2 with clause 4.5.3). As a result, `properties` can declare nested relationships as well as nested properties, recursively to any depth. [Example 30](../examples/30-csv-nested-relationship/index.md) hangs a `playsCharacter` relationship off a `hasLeadActor` relationship. A mapping can therefore represent both standard qualifiers and model-specific attribute metadata.
+
+Cassiopeia resolves metadata from the same source record as its parent attribute. For a temporal mapping, put the timestamp on the attributes that represent observations. Cassiopeia can then keep successive observations associated with the same entity identity.
+
+## Declare a value's datatype
+
+`valueType` names the datatype of an attribute's value (ETSI GS CIM 009 v1.9.1 clause 4.5.2). Declare it next to `type` and `transformation`, not under `properties`:
+
+~~~json5
+address: {
+    source: "{{ address }}",
+    valueType: "PostalAddress",
+}
+~~~
+
+Cassiopeia writes it exactly as declared, next to the value:
+
+~~~json
+"address": {"type": "Property", "value": "Pariser Platz, Berlin, Germany", "valueType": "PostalAddress"}
+~~~
+
+The core `@context` defines `valueType` with `@type: @vocab`, so the `@context` sent with the entity expands it to a datatype IRI. A term your `@context` defines, a compact IRI such as `xsd:decimal`, and an absolute IRI such as `http://www.w3.org/2001/XMLSchema#duration` all work. A term that no `@context` defines expands through the core `@context`'s `@vocab` to `https://uri.etsi.org/ngsi-ld/default-context/`. The concise representation keeps an attribute with a `valueType` as an object, because a bare value has no room for it, and the simplified representation leaves it out.
+
+Every Property type accepts a `valueType`: `Property`, `GeoProperty`, `VocabProperty`, `ListProperty`, and `JsonProperty`. A `LanguageProperty` accepts only `langString` (table 5.2.32-1). A sub-attribute under `properties` may declare its own, and so may each entry in [`instances`](#carry-several-instances-under-one-name), which lets instances in different formats be told apart, as Annex C.10 does for an address held as text in one entity and as a `PostalAddress` in another.
+
+Some declarations are refused when the mapping loads: a `valueType` on a `Relationship` or `ListRelationship`, which has none because its target type is `objectType` and Cassiopeia writes that from `target.entity`; a `valueType` under `properties`, which would become a sub-attribute that a broker refuses, with a hint to move it up a level; and a `valueType` on an entry of `mappings` or `languageMap`, which builds part of a value rather than an attribute.
+
+Other declarations are checked when the run starts, because two spellings name the same datatype only if they expand to the same IRI, and expansion needs the `@context` the entities are written with. Cassiopeia expands each declared `valueType` the way a broker would: against the entity's `@context`, with the NGSI-LD v1.9 core `@context` in the last position (clause 4.4). Under the core `@context`, `DateTime`, `ngsi-ld:DateTime`, and `https://uri.etsi.org/ngsi-ld/DateTime` are the same datatype. The run is refused when:
+
+- the value is read through a `datetime`, `date`, or `time` transformation, and the declared `valueType` names another datatype than the `DateTime`, `Date`, or `Time` that transformation produces. A `ListProperty` is checked the same way, because its `valueType` types each item of its `valueList` (table 5.2.36-1), though Cassiopeia writes no `valueType` on a list of times on its own;
+- the declared `valueType` names a `DateTime`, `Date`, or `Time`, but the value, or each item of a `ListProperty`, is not read through the matching transformation, which is the only guarantee that it has the form clause 4.6.3 requires;
+- a `LanguageProperty`'s `valueType` does not expand to `rdf:langString`;
+- the `@context` cannot be loaded or a `valueType` expands to no absolute IRI, because then it cannot be checked.
+
+The core `@context` is bundled with Cassiopeia. Any other `@context` is fetched once per run, and only for a mapping that declares a `valueType`. A context is read as JSON whatever media type it is served as, because Smart Data Models serves its contexts as `text/plain`.
+
+## Carry several instances under one name
+
+One attribute name can hold several instances that differ by `datasetId`, a _multi-attribute_ (ETSI GS CIM 009 v1.9.1 clause 4.5.5). Declare them with an `instances` list instead of a single `source`. The attribute supplies the shared `type`, `transformation`, `target`, and attribute-level `properties`. Each entry supplies only what makes it distinct: its own `source` and `datasetId`, and optionally its own [`valueType`](#declare-a-values-datatype) in place of the attribute's:
+
+~~~json5
+temperatureForecast: {
+    type: "Property",
+    transformation: "float",
+    properties: {
+        unitCode: {
+            source: "CEL",
+        },
+    },
+    instances: [
+        {
+            source: "{{ ecmwf_temp }}",
+            properties: {
+                datasetId: {
+                    source: "urn:ngsi-ld:dataset:model:ecmwf",
+                },
+            },
+        },
+        {
+            source: "{{ gfs_temp }}",
+            properties: {
+                datasetId: {
+                    source: "urn:ngsi-ld:dataset:model:gfs",
+                },
+            },
+        },
+    ],
+}
+~~~
+
+The result is serialized as a JSON array of attribute objects, one per instance. At most one instance may omit its `datasetId`; that instance is the default.
+
+`instances` works on every reified attribute kind. Each instance's `source` provides the value that kind reads from a single source:
+
+- On a **Property** or any of its subtypes (`GeoProperty`, `LanguageProperty`, `VocabProperty`, `ListProperty`, `JsonProperty`), the `source` is a value. An instance with no value contributes nothing, so a model that reports no value for a record produces no instance. [Example 21](../examples/21-json-dataset-id/index.md) carries several numerical-model forecasts under one Property name.
+- On a **Relationship**, the `source` is the target object's ID, and every instance shares the attribute-level `target`. An instance whose `source` names no target, by the rule for a [single relationship](#relationship), is left out, and the other instances keep their own `datasetId`. [Example 29](../examples/29-csv-multi-attribute-relationship/index.md) gives a flight one `servesAirport` name with departure and arrival instances.
+- On a **ListRelationship**, the `source` is an object-ID list, tokenized as it is for a plain list relationship. Each instance becomes its own `objectList` under its own `datasetId`. Tokens that name no target are skipped, and an instance left with no tokens is left out while the others keep their `datasetId`.
+
+`observedAt`, `expiresAt`, and `unitCode` are qualifiers themselves, so clause 4.5.5 does not allow them to be multi-attributes. They may appear only inside an instance's shared or per-instance `properties`.
+
+Only a top-level attribute can declare `instances`, including a top-level attribute of a `syntheticEntity`. An entity can hold several instances of one attribute, but a sub-attribute under `properties` is a single Property or Relationship (clauses 4.5.2.2 and 4.5.3.2). A member under `mappings` is a single JSON member, and a `languageMap` entry is a single localized string. A mapping that declares `instances` on any of them is rejected when it loads. The error names the declaration by its path, such as `temperature.accuracy` or `address[street]`.
+
+## Emit a related entity
+
+Sometimes a record contains enough information to describe a related entity as well as the main one. Add `syntheticEntity` to the attribute that links the entities:
+
+~~~json5
+owner: {
+    type: "Relationship",
+    syntheticEntity: {
+        dataModel: "Organization",
+        identity: {
+            entityName: "{{ owner_id }}",
+        },
+        attributes: {
+            name: {
+                source: "{{ owner_name }}",
+            },
+        },
+    },
+}
+~~~
+
+The synthetic entity uses the same source record but has its own data model, identity, optional scope, and attributes. It does not inherit the main entity's scope. Cassiopeia emits it alongside the main entity and links it through the attribute that declares it. The nested mapping inherits the document version, so it does not need its own `version` field.
+
+A synthetic entity exists only when its `identity.entityName` resolves to an ID, by the rules in [Choose the entity identity](#choose-the-entity-identity). When it resolves to nothing, Cassiopeia emits neither the synthetic entity nor the link, and the main entity is still written. The example above does this for every record without an `owner_id`. The same holds when the attribute also declares a `source` and a `target` and that source names no target. When the synthetic identity or that `source` fails to render, the result is the same, and the run also reports an `expander-relationship-unresolvable` warning.
+
+On a `ListRelationship`, Cassiopeia emits one synthetic entity per token of the source, and the synthetic mapping reads the token as `{{ this[0] }}`. A token whose synthetic identity resolves to nothing or fails to render contributes neither an entity nor a link, and the other tokens are kept. A failure is reported as an `expander-relationship-unresolvable` warning.
+
+Use a synthetic entity when the source record is the only place where the related entity can be described. A relationship to an entity defined by another source does not need a synthetic entity. It only needs a target declaration.
+
+## Keep mapping and execution separate
+
+A mapping should stay focused on the record-to-entity transformation. Put these concerns outside it:
+
+- Put the input path or URL in a CLI invocation or manifest.
+- Put the output directory or context broker in output settings.
+- Put validation strictness in output or command settings.
+- Put schedules, retries, and failure policy in a manifest.
+- Put general defaults in the configuration file and its overrides.
+
+This separation lets the same mapping run against different inputs, destinations, and schedules without changing the transformation.
+
+## Check a mapping
+
+Start with one record and one or two attributes. Run the mapping before adding nested structures or conditional templates. If the result is not what you expect, check the resolved identity first, then the source path, transformation, and selected NGSI-LD type.
+
+Cassiopeia reads mappings as JSON5, so comments and trailing commas are allowed. The `format` command can reformat a mapping without changing its meaning. Use `.json5` for the recommended format or `.json` when another tool requires strict JSON.
+
+Cassiopeia compiles every template when it loads the mapping, so a broken template stops the run before any input is read. That covers a syntax error, an unclosed `{{`, `{%`, or `{#`, a block without its end tag such as `{% endif %}`, an unknown filter, function, or test, an unspaced hyphen between two names inside an expression (`{{ station-id }}`), and a non-ASCII name inside an expression (`{{ čas | upper }}`). The error names the mapping file and where the template is declared (`identity.entityName`, `scope`, `observedAt`, or the attribute) and says what to change, such as `upper` for a misspelt `uper`, or `this['station-id']` for `station-id`. Run with `-v` to add Tera's own report, with the column in your template. See [When a template fails](./templates.md#when-a-template-fails).
+
+A record or attribute that Cassiopeia leaves out while the run continues is counted under its reason in the run summary's `Reasons` block, such as `expander-urn-ungeneratable` for a skipped record or `extractor-template-unresolvable` for a dropped attribute.
+
+If the mapping loads but an entity fails validation, inspect the output value instead of only the mapping syntax. A schema may require a number where the source provides text, a GeoProperty where the mapping creates a Property, or a particular attribute name. The fix is usually an explicit transformation, type, or source path.
+
+## Next steps
+
+- [Templates](./templates.md): see the full filter and function vocabulary for `source` expressions.
+- [Source formats](./source-formats.md): the records a particular input produces.
+- [Choosing a data model](./data-models.md): whether to target a published model or one of your own.
+- [Output](./output.md) and [representations](./representations.md): where entities go and the shape they take.
+- [Validation](./validation.md): how entities are checked against a schema before writing.
+- [Manifests](./manifests.md): save a complete run for reuse or scheduling.
