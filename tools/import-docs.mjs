@@ -49,6 +49,7 @@ const PAGES = {
   'scheduling.md': 'guides/scheduling.md',
   'cli.md': 'reference/cli.md',
   'docker.md': 'reference/docker.md',
+  'advisory-rulings.md': 'reference/advisory-rulings.md',
   'tui.md': 'reference/tui.md',
   'architecture.md': 'reference/architecture.md',
   'ngsi-ld/attribute-types.md': 'reference/ngsi-ld/attribute-types.md',

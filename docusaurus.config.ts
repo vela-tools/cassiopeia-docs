@@ -202,13 +202,13 @@ const config: Config = {
         // exist here.
         docsDir: [
           {
-            path: 'versioned_docs/version-1.3.0',
+            path: 'versioned_docs/version-1.3.1',
             routeBasePath: 'docs',
           },
         ],
         title: 'Cassiopeia',
         description: tagline,
-        version: '1.3.0',
+        version: '1.3.1',
         rootContent: [
           'Cassiopeia is an open-source (EUPL-1.2) command-line tool that turns CSV, JSON, GeoJSON,',
           'KML/KMZ, XML, ESRI Shapefiles, GeoPackages, GRIB, NetCDF and OGC SensorThings API data',
@@ -276,8 +276,12 @@ const config: Config = {
           // them out of that contest; the matching sitemap exclusion below
           // stops the site advertising URLs it asks not to be indexed.
           versions: {
+            '1.3.1': {
+              label: 'v1.3.1',
+            },
             '1.3.0': {
               label: 'v1.3.0',
+              noIndex: true,
             },
             '1.2.0': {
               label: 'v1.2.0',
@@ -335,6 +339,7 @@ const config: Config = {
             '/docs/1.1.0/**',
             '/docs/1.1.1/**',
             '/docs/1.2.0/**',
+            '/docs/1.3.0/**',
           ],
         },
       } satisfies Preset.Options,

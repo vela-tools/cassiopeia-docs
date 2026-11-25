@@ -1,0 +1,1616 @@
+---
+title: "Source formats and record shapes"
+sidebar_label: "Source formats"
+description: "The record shape Cassiopeia produces for CSV, JSON, GeoJSON, KML/KMZ, XML, ESRI Shapefiles, GeoPackages, GRIB, NetCDF and the OGC SensorThings API, and how it detects a format from content."
+keywords: ["CSV", "JSON", "GeoJSON", "KML", "KMZ", "XML", "Shapefile", "GeoPackage", "GRIB", "NetCDF", "SensorThings API", "format detection"]
+---
+# Source formats
+
+Cassiopeia converts each supported source format into a sequence of records before applying a mapping. Each format produces a different record shape, so start by checking what Cassiopeia puts in a record before writing the mapping.
+
+Most inputs can use automatic format detection. Cassiopeia inspects the source and selects the most specific supported format it recognizes. Declare the format when the source has no useful extension, its content is ambiguous, or you want the run configuration to make the choice explicit.
+
+The format can be set on a manifest input with `format`, or through the equivalent command-line option. The accepted values are `csv`, `json`, `geojson`, `kml`, `kmz`, `xml`, `shapefile`, `geopackage`, `grib`, `netcdf`, and `sensorthings`.
+
+## At a glance
+
+| Format | Records | Important source shape | Collections |
+| --- | --- | --- | --- |
+| CSV | One record per data row | Column names become fields | No |
+| JSON | One record per object in a top-level array, or per item of a listed nested array | The object is used as-is | Nested arrays of objects become collections |
+| SensorThings API | One record per Thing of a latest read, or per Observation, and per HistoricalLocation when they are read, of a range or incremental read | `server`, `thing`, `location`, `locations`, and `readings` or `historicalLocation` | No |
+| GeoJSON | One record per feature | `id`, `properties`, `geometry`, `bbox`, and `featureCollection` | No |
+| KML or KMZ | One record per placemark | `properties` and `geometry` | Folders become collections |
+| XML | Determined by the repeated-child convention | Folded element tree with `@` and `#` keys | No |
+| ESRI Shapefile | One record per feature | `properties` and WGS84 `geometry` | Multiple layers become collections |
+| GeoPackage | One record per table row | `properties` and, for features, WGS84 `geometry` | Multiple tables become collections |
+| GRIB | One record per unmasked grid cell | Coordinates, times, level, and parameter columns | No |
+| NetCDF | One record per unmasked grid cell, or per station observation | Coordinates, time, level, other coordinates, and data variable columns | No |
+
+The collection column matters when a source contains several logical groups that need different mappings. KML folders, multi-layer Shapefile archives, multi-table GeoPackages, and nested JSON arrays are currently the only formats that provide collections.
+
+## Automatic detection and explicit format
+
+Automatic detection uses the source content. A JSON document that is also valid GeoJSON is classified as GeoJSON rather than generic JSON, and a SensorThings snapshot is recognized by its header line before the JSON check runs. Cassiopeia checks for KML before generic XML and distinguishes a Shapefile archive from other ZIP files by its contents. It identifies GRIB from its binary marker and reads the edition from the header. It identifies NetCDF from the classic `CDF` marker and version byte, or from the HDF5 signature of a NetCDF-4 file, including one placed behind an HDF5 user block. It recognizes a GeoPackage from its SQLite header and the `application_id` it declares, including the `GP10` and `GP11` identifiers of GeoPackage 1.0 and 1.1, so a plain SQLite database is not mistaken for one.
+
+Use an explicit format when detection does not have enough context. For example, a small or unusual delimited file may need to be declared as CSV. A source downloaded without a meaningful filename may also need an explicit format in the run configuration.
+
+The format declaration selects the ingestor but does not change the source data. The mapping must still use the record shape that the ingestor produces.
+
+## Inspecting a source
+
+The `profile` command uses the same detection as a mapping run and prints the result without reading the whole source or writing anything. Use it to confirm which ingestor a file selects. For formats that expose parsing details, it also shows those details before you write a mapping or decide to declare the format explicitly.
+
+~~~bash
+cassiopeia profile energy-1m.csv
+~~~
+
+~~~text
+energy-1m.csv · 127.5 MiB
+CSV · text/csv · 90% confidence
+delimiter "," · quote "\"" · skipRows 0 · headerRows 1 · terminator "crlf" · encoding "UTF-8"
+~~~
+
+The report has at most three lines. The first names the file and gives its size. The second shows the detection result: the format, its media type, and a confidence score. The third appears only when the format has detectable parsing details. For CSV, it shows the dialect above: the delimiter, the quoting, the preamble, the header, the line terminator, and the character encoding. It uses the member names and value syntax of a manifest input's [`dialect`](./manifests.md#csv-dialect), so a member that detection got wrong can be copied into a manifest and corrected there. For GRIB, it shows the edition. Formats that need no such parameters, including JSON, GeoJSON, KML, XML, Shapefile, GeoPackage, NetCDF, and a SensorThings snapshot, print only the first two lines.
+
+~~~text
+stations.geojson · 4.2 KiB
+GeoJSON · application/geo+json · 100% confidence
+~~~
+
+The report goes to standard output, so redirection captures it intact. Cassiopeia adds colour only when the output is an interactive terminal. The report describes the format and its parsing, not the record shape. To see the fields a mapping will address, map a small sample and inspect one record.
+
+## CSV
+
+Cassiopeia treats a CSV source as a table. The header row supplies the field names, and each following row becomes one record. A CSV source is always a single collection, so its records do not carry a collection label.
+
+### Dialect detection
+
+Cassiopeia profiles the CSV before reading it. It detects the delimiter, the quote character, any preamble above the table, how many rows the header spans, and whether lines end with LF, CRLF, or a lone CR. The profiler considers comma, tab, semicolon, pipe, and space delimiters, along with double quotes, single quotes, or no quoting. A file that none of these delimiters splits into columns, such as a list of names under a `name` header, is read as a table of one column, and the profile reports it with a comma delimiter. A table of several columns always wins over a single-column reading. The ingestor reads the file with exactly the dialect the profiler reports, so the preamble it skips and the field names it uses are the ones `cassiopeia profile` shows.
+
+A quote inside a quoted field is read as RFC 4180 writes it, doubled (`""`), unless the file escapes it with a backslash (`\"`), as MySQL's `SELECT ... INTO OUTFILE` and PHP's `fputcsv` do. Both kinds of file parse without error either way, so the profiler takes the backslash only on evidence: a quoted field that, read with doubled quotes, closes at a backslash and a quote and continues with more text, as `"say \"hi\""` does, and fewer such fields when read with the backslash. A quoted Windows path that ends in a backslash, such as `"C:\data\",1`, closes before a delimiter, so it is no such evidence and the file keeps doubled quotes. For a backslash-escaped file the profile report shows `escape "\\"`; for doubled quotes it shows no `escape`. When detection gets it wrong, state `escape` in the input's [`dialect`](./manifests.md#csv-dialect).
+
+When detection gets a member wrong, state it in the input's [`dialect`](./manifests.md#csv-dialect). A stated member is used as stated, and only the members left out are detected. A dialect with every structural member stated is used without any detection.
+
+Cassiopeia keeps a header's text as written, accented characters and punctuation included. It drops the spaces around a header, as it does around a value, so a table padded for reading, such as `id | name`, has the fields `id` and `name`. It replaces a newline inside a quoted header with a space. A field name that is not an identifier is read with bracket notation, as in `{{ this['NO2 HMW µg/m³'] }}`. A column whose header is blank is keyed by its zero-based position, as in a headerless file, so it is read as `{{ this['0'] }}`.
+
+Two columns can end up asking for the same field name: a header repeats a name (`id;value;value`), a stacked header joins two columns to the same name, or a blank header's position equals another column's name. Cassiopeia keeps every column. One column keeps the name, and each other one is keyed by the name, an `@`, and its one-based column number, as a spreadsheet counts columns. In `id;value;value`, column 2 is read as `{{ this['value'] }}` and column 3 as `{{ this['value@3'] }}`. A named column keeps the name over a blank one, and otherwise the leftmost column keeps it. A generated name never replaces a name that another column's header already uses: if the file also has a `value@3` column, the repeat becomes `value@3@3`. The run reports one `ingest-columns-renamed` warning per file. The warning lists up to three renamed columns, each with the name its header asked for and the name to read it by, and counts the rest. With `--verbose`, it lists every renamed column.
+
+:::warning
+
+Migrating from v1.1.1: in a header that repeats a name, the last column used to keep the name and the earlier ones were dropped. Now the leftmost column keeps it, so in `id;value;value` a mapping's `{{ this['value'] }}` reads column 2 instead of column 3. To keep reading column 3, change the mapping to `{{ this['value@3'] }}`.
+
+:::
+
+### Character encoding
+
+Cassiopeia reads a CSV in the character encoding it detects and converts it to UTF-8, so a Windows-1252 or ISO-8859-2 file is read correctly rather than rejected. A file that starts with a byte order mark is read as the UTF-8, UTF-16LE, or UTF-16BE that the mark names, ahead of anything else, and `cassiopeia profile` reports that encoding. A file without one is read as UTF-16, as in a spreadsheet's Unicode text export, when its byte count is even and, in one byte order, every character it holds below U+0100 is text: a printable character, a tab, or a line end, never a NUL or another control character. The delimiters and line ends of a CSV are such characters, so a file of long Chinese, Japanese, or Korean cells is recognised as surely as one of ASCII. When both byte orders read as text, the one with more line ends wins. A `charset` the server declares wins over this check. For a source fetched by URL, a `charset` the server declares in its `Content-Type` decides the encoding outright. A `charset` such as `iso-2022-kr`, which the Encoding Standard decodes to a single replacement character, declares nothing. Without a `charset`, the encoding is guessed from the content, and the domain the file is served from, after any redirect, weighs the guess toward the encodings used in that region, as a browser does for an undeclared page. That settles files whose only non-ASCII characters are symbols. In Windows-1252, `µg/m³` and `°C` use bytes that ISO-8859-2 reads as the letters `ľ` and `ł`, and content alone cannot tell which was meant. Served from a `.at` or `.de` domain, such a file reads as Windows-1252. A local file has no such context, so its encoding comes from its content alone, and `cassiopeia profile` on a downloaded copy can report a different encoding than a run that reads the same file by URL. An `encoding` stated in the input's `dialect` wins over both the declared `charset` and the guess, but not over a byte order mark: the file is always read in the encoding its mark names, so the run uses and reports that encoding.
+
+The guess weighs the whole file, not only the rows the dialect is detected from, so a name with an accented letter far down a file of plain ASCII rows still decides the encoding. Only lines with a non-ASCII character carry evidence, so only those are weighed. Up to 8 MiB of them is drawn from across the whole file, which keeps detection under a second for a file of any size. A file that is valid UTF-8 throughout is read as UTF-8. A file whose lines end with a lone carriage return is weighed line by line too. A file is never repaired. When a line holds bytes that are not valid in the encoding the file is read as, typically because a server declared `charset=utf-8` for a Windows-1252 file, the run fails and names the line of the file and the encoding, counting from the first line, title and header included. This is a line of the file, as a text editor numbers it, and not the row a misshapen-row warning names: every line break counts here, the one inside a quoted field and a blank line included. The bytes are never replaced with `�` in the values Cassiopeia maps.
+
+### Preamble and stacked headers
+
+Some feeds put a title line above the table. Cassiopeia skips such leading rows as a preamble when each of them has a different number of fields from the table below. A title row with as many fields as the table is also skipped in two cases. The first is a title padded to the table's width, with text in its first cell at most and the rest blank, as spreadsheet exports write it (`Air quality report;;;`); a header whose only label follows a blank first cell, as pandas writes an unnamed index column (`;Mayor`), is a header and not such a title; a run of such rows, blank rows included, directly above the header is skipped whole. The second is a fully filled title above a header whose labels sit over at least two numeric, date, or other typed columns, where the header row reads as a header and not as data. A missing-value marker over a typed column, such as `n/a`, `NULL`, `NaN`, or `NE`, counts as neither a label nor a value, so a first data row of such markers never turns the real header above it into a title. A fully filled title above a table whose columns are all text cannot be told apart from a header and is read as one. The preamble is counted in CSV records, not lines, so a quoted title that spans two lines is one record and the header below it is read intact. A blank line is not a record, so a title over a blank line over the header is a preamble of one. The profile report shows it as `skipRows 1`. Detection looks for a preamble in the first 10 records only, so a file with a longer one needs `skipRows` stated in the input's [`dialect`](./manifests.md#csv-dialect).
+
+A header can also span several rows, such as a name row, an aggregation row, and a unit row. Cassiopeia treats a row directly below the header as part of it when every non-blank cell is a short label with no number or date in it, and the row leaves its first column blank while every data row fills it, as a stacked header leaves its station or key column unlabelled. A first data row with a blank cell further along, a missing value, still fills its key column, so it stays data. Each column's non-blank header cells are joined from top to bottom with a space, so `NO2` over `HMW` over `µg/m³` becomes the field `NO2 HMW µg/m³`. Two columns that share a name but differ in a lower row, such as `PM10 MW24 µg/m³` and `PM10 HMW µg/m³`, become distinct fields. The profile report shows the header as `headerRows 3`. A header spans at most four rows. A lower header row with another number of fields than the first, such as a unit row one field short, is joined over the columns it reaches rather than failing the file.
+
+### Rows of another width
+
+RFC 4180 has every row of a CSV hold the same number of fields. A row that does not, such as a row one field short, a row with an extra field, or a `Source: …` note below the table, is skipped. Which of its fields is missing or extra cannot be told, so it is never padded or cut to fit. The rows around it are read as usual. A trailing delimiter is the one exception, since the field it adds is empty and holds no value. A row that ends with a delimiter its table's header does not have, such as `1;2;3;` under `a;b;c`, is read with that empty field dropped. A header that ends with one, such as `a;b;c;` over `1;2;3`, gives the table an unnamed last column, which rows without the delimiter leave empty. Either way only the empty fields at the end of a row are dropped or added, and a row short of a named column, or with a value past the table's last column, is still skipped. A file without a header follows the same rule, with its first row in place of the header. The run reports one `ingest-rows-misshapen` warning per file, naming a downloaded file by its URL. The warning names the table's field count and up to three skipped rows with their field counts, and counts the rest. A row is numbered from the top of the file, title and header rows included, as a spreadsheet numbers rows. A quoted field that spans several lines leaves its row one row, and a blank line is not counted. A row number can therefore be lower than the line a text editor shows, which is the number an encoding error names. Detection skips such rows too, as long as most rows of the sample have the table's width.
+
+:::warning
+
+A footer row as wide as the table, such as a `Total;;60` sum row, cannot be told apart from data, so it is mapped as a record. Remove such rows before ingesting.
+
+:::
+
+### Value inference
+
+Cassiopeia converts CSV fields to JSON values as it reads them:
+
+- Empty fields become `null`, and so does `\N`, the missing-value token of SQL dumps.
+- Values listed in the input's `dialect.nullValues`, such as `NE`, become `null`.
+- Integers and decimal numbers become JSON numbers. A decimal comma, as in `12,45`, is read as a number only when the input's `dialect` states `decimalSeparator: ","`; otherwise the value stays a string.
+- `true` and `false` become booleans, ignoring case. `yes`, `no`, `on`, and `off` remain strings, because a column of codes holds them as often as a column of answers: the ISO 3166 code of Norway is `NO`. Declare `transformation: "boolean"` to read them as booleans.
+- Values with leading zeroes remain strings, which preserves identifiers such as `00123`.
+- Everything else remains a string.
+
+This inference provides a useful starting point, but it does not replace an intentional mapping. Use an explicit transformation when the target model requires a particular type or when the value's meaning is not clear from its spelling.
+
+### Mapping a CSV record
+
+For a row such as:
+
+~~~text
+station_id,name,temperature
+A-17,Main station,21.5
+~~~
+
+The mapping can address the fields directly:
+
+~~~json5
+identity: {
+    entityName: "Station-{{ station_id }}",
+},
+attributes: {
+    name: {
+        source: "{{ name }}",
+    },
+    temperature: {
+        source: "{{ temperature }}",
+        transformation: "float",
+    },
+}
+~~~
+
+Mappings address named fields, so a headerless file may need preprocessing before it can be mapped cleanly. If Cassiopeia cannot infer the dialect reliably, declare `format: "csv"`, state the members it gets wrong in the input's [`dialect`](./manifests.md#csv-dialect), and verify the resulting record shape before writing the mapping.
+
+## JSON
+
+The generic JSON ingestor decides the records from the shape of the document. It applies the same rule to every document and never guesses from member names.
+
+An array of objects is the most common shape. Each object becomes one record, and its nested structure is preserved:
+
+~~~json
+[
+    {
+        "id": "A-17",
+        "reading": {
+            "value": 21.5
+        }
+    },
+    {
+        "id": "A-18",
+        "reading": {
+            "value": 20.9
+        }
+    }
+]
+~~~
+
+A mapping can address the nested value with `{{ reading.value }}`.
+
+A single object is one record:
+
+~~~json
+{
+    "id": "A-17",
+    "reading": {
+        "value": 21.5
+    }
+}
+~~~
+
+An object with exactly one array member is an envelope. The items of that array are the records, and the other members of the object are dropped. This document yields the records `A-17` and `A-18`, and `generated` is part of neither:
+
+~~~json
+{
+    "generated": "2026-10-25",
+    "items": [
+        {
+            "id": "A-17"
+        },
+        {
+            "id": "A-18"
+        }
+    ]
+}
+~~~
+
+An envelope whose array is empty yields no records.
+
+An object with no array member, or with two or more, is one record. Cassiopeia does not pick one array over another, so this document is a single record that keeps both arrays:
+
+~~~json
+{
+    "id": "A-17",
+    "inbound": [
+        {
+            "line": "1"
+        }
+    ],
+    "outbound": [
+        {
+            "line": "2"
+        }
+    ]
+}
+~~~
+
+Every record must be a JSON object. A top-level scalar is refused with `expected a top-level JSON object or an array of objects`. An array, or an envelope array, that holds anything other than objects is refused with `expected every array element to be a JSON object`.
+
+The envelope rule limits what a single record can hold. A single object with exactly one array member is read as an envelope, not as a record. When that array holds objects, they become the records and the other members are lost:
+
+~~~json
+{
+    "id": "C-1",
+    "tags": [
+        {
+            "id": "x"
+        }
+    ]
+}
+~~~
+
+This document yields one record, `{"id": "x"}`, and `C-1` is lost. When the array holds scalars, as in `"tags": ["a", "b"]`, the document is refused. Wrap such a record in an array, `[{...}]`, so that the array is the top-level value and the record is read whole.
+
+Generic JSON and GeoJSON use the same syntax, but they have different record conventions. Cassiopeia routes a valid GeoJSON document to the GeoJSON ingestor.
+
+### Nested collections
+
+The rules above apply to an input with a single `mapping`. An input with a `mappings` list reads the JSON document as collections instead, which reaches records that sit below the top level.
+
+Every non-empty array whose items are all objects is a collection. Its label is the path of member names that leads to it from the root, joined with `.` and without array indices. The root array has no member path, so it is not a collection itself, but the members of its items are. An array that holds anything other than objects is a plain value. This document has the collections `data.monitors`, `data.monitors.lines`, and `data.monitors.lines.departures.departure`:
+
+~~~json
+{
+    "data": {
+        "monitors": [
+            {
+                "locationStop": {
+                    "properties": {
+                        "title": "Schwedenplatz",
+                        "attributes": {
+                            "rbl": 4116
+                        }
+                    }
+                },
+                "lines": [
+                    {
+                        "name": "U1",
+                        "towards": "Oberlaa",
+                        "departures": {
+                            "departure": [
+                                {
+                                    "departureTime": {
+                                        "countdown": 5
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        ]
+    },
+    "message": {
+        "value": "OK"
+    }
+}
+~~~
+
+Each item of a listed collection becomes one record. A collection that is not listed yields no records, and the members outside every listed collection, such as `message` above, are dropped. The input below maps one record per departure:
+
+~~~json5
+{
+    source: "https://www.wienerlinien.at/ogd_realtime/monitor?stopId=4116",
+    format: "json",
+    mappings: [
+        {
+            collection: "data.monitors.lines.departures.departure",
+            mapping: "departure.json5",
+        },
+    ],
+}
+~~~
+
+A record keeps its own fields whole, nested collections included. It also carries every object that encloses it on the path from the root, whether an array item or a plain object, under the name of the member that holds it. An enclosing object comes without its collections and without the members on the listed path, because those are records or enclosing objects of their own. An enclosing object left with no fields is not added, which is why the record below has no `data` and no `departures`. The departure record above is:
+
+~~~json
+{
+    "departureTime": {
+        "countdown": 5
+    },
+    "lines": {
+        "name": "U1",
+        "towards": "Oberlaa"
+    },
+    "monitors": {
+        "locationStop": {
+            "properties": {
+                "title": "Schwedenplatz",
+                "attributes": {
+                    "rbl": 4116
+                }
+            }
+        }
+    }
+}
+~~~
+
+Its mapping can read `{{ departureTime.countdown }}`, `{{ lines.name }}`, and `{{ monitors.locationStop.properties.attributes.rbl }}`. When a name clashes, the record's own field wins, and then the nearest enclosing item. The items of a root array enclose nothing, because the root array has no name to file them under.
+
+A lone object on a listed path counts as a collection of one item. JSON converted from XML writes an element that occurs once as an object and the same element occurring twice as an array, so the shape of a collection changes with the number of its items. In this document, Barking has two sites and Hackney has one, and `Index.Authority.Site.Species` still yields one record per reading, each carrying its `Site` and its `Authority`:
+
+~~~json
+{
+    "Index": {
+        "Authority": [
+            {
+                "@Name": "Barking",
+                "Site": [
+                    {
+                        "@Code": "BG1",
+                        "Species": [
+                            {
+                                "@Code": "NO2",
+                                "@Index": "1"
+                            }
+                        ]
+                    },
+                    {
+                        "@Code": "BG2",
+                        "Species": {
+                            "@Code": "NO2",
+                            "@Index": "3"
+                        }
+                    }
+                ]
+            },
+            {
+                "@Name": "Hackney",
+                "Site": {
+                    "@Code": "HK6",
+                    "Species": [
+                        {
+                            "@Code": "NO2",
+                            "@Index": "4"
+                        }
+                    ]
+                }
+            }
+        ]
+    }
+}
+~~~
+
+An object that is not on a listed path stays an ordinary field of the object that holds it.
+
+Listing both a collection and one nested in it yields records from both, in document order. A label that matches no collection yields no records. A top-level scalar is refused as it is under a single `mapping`.
+
+## SensorThings API
+
+Cassiopeia reads [OGC SensorThings API](https://www.ogc.org/standards/sensorthings/) data, versions 1.0 and 1.1, from a server or from a **snapshot file**: the data streams, Datastreams and MultiDatastreams, the Observations, the HistoricalLocations of their Things, and the Things a latest read lists by themselves, that one read of a SensorThings server collected, written as JSON Lines. A server serves its readings as nested JSON whose shape changes with the request, so every read of a server is written into a snapshot first, and the ingestor joins each reading with its Thing, Location, data stream, ObservedProperty and Sensor. A mapping then reads one record shape, whichever server the readings came from, and whether they were read from the server or replayed from a file.
+
+### Reading a server
+
+A remote input whose `format` is `sensorthings` and whose `source` is a service root reads the server itself:
+
+~~~json5
+{
+    source: "https://api-samenmeten.rivm.nl/v1.0",
+    format: "sensorthings",
+    mapping: "air-quality-observed.json5",
+    sensorthings: {
+        datastreams: "startswith(name,'ILM_I67-') or startswith(name,'ILM_I68-')",
+        read: "latest",
+        pageSize: 10,
+        delay: "200ms",
+    },
+}
+~~~
+
+The service root is the URL every resource of the server is addressed under, and it ends with the version the server serves, such as `/v1.0` or `/v1.1`. The `sensorthings` block selects the data streams and limits the read. [SensorThings settings](./manifests.md#sensorthings-settings) lists its members and the rules a manifest must keep. `read: "latest"`, the default, reads the newest reading of every selected data stream, which gives one record per Thing. `read: { range: { ... } }` reads every reading of a time range, which gives one record per Observation (see [Reading a time range](#reading-a-time-range)). `read: { incremental: { ... } }` reads every reading gained since the last successful cycle, also one record per Observation (see [Reading new readings](#reading-new-readings)).
+
+Each cycle writes what it read into a snapshot whose `serviceRoot` is the root and whose `collectedAt` is the instant the cycle started. The snapshot is then profiled and read as a local one would be, so the [records](#sensorthings-records) are the same. Every attempt at one scheduled run starts from the same instant, so a retried attempt sends the same requests and records the same time.
+
+**The request.** A latest read sends one request, and follows it page by page:
+
+~~~text
+{root}/Datastreams?$filter={datastreams}&$top={pageSize}&$expand=Thing/Locations,ObservedProperty,Sensor,Observations($orderby=phenomenonTime%20desc;$top=1)&$orderby=id%20asc
+~~~
+
+It selects every Datastream with its Thing, the Thing's Locations, its ObservedProperty, its Sensor, and its newest Observation, in id order. `$filter` is sent only when `datastreams` is set. Its value is sent as written, percent-encoded, with a space as `%20` and `'` as `%27`. The Locations are expanded by path, `Thing/Locations`, because some servers ignore an `$expand` nested in parentheses, such as `Thing($expand=Locations)`. With `featuresOfInterest: true`, the newest Observation is also expanded with its FeatureOfInterest (see [Features of interest](#features-of-interest)). A read that selects MultiDatastreams sends the same request to the MultiDatastreams collection as well (see [MultiDatastreams](#multidatastreams)). With `things`, a latest read then lists Things by themselves, which finds a Thing that has no data stream (see [Things without data streams](#things-without-data-streams)).
+
+**Paging.** A server answers with pages of at most `pageSize` items. Every page but the last links to the next one with `@iot.nextLink`. Cassiopeia follows each link as the server wrote it, resolved against the page it came from, and adds nothing to it (OGC 18-088 section 9.3.3.6). The input fails without sending the request:
+
+- when a link names another scheme, host, or port than the service root, because the input's `headers`, and so its credentials, go with every request;
+- when a link leads back to a page already read.
+
+A body that is not a page of a collection, a JSON object with a `value` array, fails the input, and the error names the URL and what the body is not. Pages are retried as any remote source is (see [Retried requests](./manifests.md#retried-requests)). `delay` spaces the requests of one cycle. Stopping the run with Ctrl+C, SIGTERM or SIGHUP ends collection before its next request (see [Stop a run](./running.md#stop-a-run)).
+
+**Limits.** A read follows each request it sends for at most `limits.pages` pages. At the limit, it keeps what it read and the cycle carries on. One `collect-limit-reached` warning per server and limit names the server, the limit, and the next link the read did not follow. Raise the limit, or select fewer data streams with `datastreams`. A range or incremental read also stops at `limits.observations` (see [Reading a time range](#reading-a-time-range)).
+
+**Servers differ.** Servers answer the same request in different ways:
+
+- FROST-Server applies every filter, serves up to 10000 items a page by default, and answers the request as written.
+- RIVM Samen Meten (`https://api-samenmeten.rivm.nl/v1.0`) applies a `datastreams` filter only to a Datastream's own properties, such as `endswith(name,'-pm10')` or `startswith(name,'ILM_')`. A filter on `ObservedProperty` or `Thing`, such as `ObservedProperty/name eq 'pm10'`, gives one data stream, every data stream, or none, without an error. RIVM also ignores the parentheses of a filter: it reads `(a or b) and c` as `a or b and c`, so write a filter that needs none, such as conditions joined by `or`. RIVM serves at most 200 items a page. Finding the newest Observation of each data stream takes it up to half a second, so a latest page of 200 times out. Set `pageSize: 10` for a latest read of RIVM. It holds tens of thousands of data streams, so select them by name, and set a `delay` to spare the public service. RIVM at times answers a request with `400 Bad Request` and the same request with its data a minute later. A schedule ends at its first failed run by default, so give a scheduled read of RIVM a `retry` (see [Bound and harden the schedule](./scheduling.md#bound-and-harden-the-schedule)).
+- 52°North SensorThings API 3.3.8 serves SensorThings API 1.1 with text ids, such as `1ad2407f-053e-413a-b78e-b3c6293af62e`, and without the MultiDatastream extension: its root lists no MultiDatastreams, and it answers the `MultiDatastreams` collection with `404 Not Found`. It applies every filter Cassiopeia sends. It links a full page to a next one, even when no item is left, and its next links percent-encode the whole query, which it reads back, but join the options of an expansion with `&` where OGC 18-088 section 9.3.2.1 has `;`, such as `Thing($expand=Locations($top=100)&$top=100)`, and it answers such a link with `400 Bad Request`. It writes the `Thing/Locations` of a discovery that way, so a read whose data streams take more than one page fails: set `pageSize` above the number of data streams the read selects. A read of Observations without features of interest pages as written. With `featuresOfInterest: true`, a latest read fails, because the server breaks off its answer with an error of its own and the read finds that the body is not JSON. A range or incremental read gets no FeatureOfInterest by default, so its readings have no `featureOfInterest` and the run reports a `collect-features-of-interest-unserved` warning: the server leaves an expanded entity out of an Observation whose members are selected, unless its setting `server.feature.implicitExpand`, `SERVER_FEATURE_IMPLICITEXPAND` in its container, is `true`. With the setting or without it, the next link of such a read nests the FeatureOfInterest's selection with `&`, so a range or incremental read with `featuresOfInterest: true` fails once a data stream's Observations take more than one page: set `pageSize` above the number of Observations a data stream holds in the range.
+- istSOS4 1.3 serves SensorThings API 1.1 with integer ids, under its own path, such as `http://localhost:8018/istsos4/v1.1`, and without the MultiDatastream extension: its root lists no MultiDatastreams, and it answers the `MultiDatastreams` collection with `400 Bad Request`. It builds a next link from the first `$top=` of the request, so Cassiopeia writes the `$top` of a discovery before the `$top=1` of the newest Observation a latest read expands. It applies every filter Cassiopeia sends, and refuses a navigation property in `$select`, which Cassiopeia does not send.
+
+### Reading a time range
+
+A range read reads every reading of a time range from each selected data stream:
+
+~~~json5
+sensorthings: {
+    datastreams: "startswith(name,'ILM_I68-')",
+    read: { range: { last: "24h" } },
+},
+~~~
+
+**Bounds.** The read covers `phenomenonTime` from its start, included, to its end, excluded, computed from the instant the cycle started:
+
+- `last: "24h"` reads the 24 hours before the cycle start.
+- `from` and `to` read from `from` to `to`, as written.
+- `from` alone reads from `from` to the cycle start.
+
+Every attempt at one scheduled run starts from the same instant, so a retried attempt reads the same range, and each later run reads from its own start. When the start is not before the end, as for a `from` after the cycle start, the read requests nothing, its snapshot holds its header alone, and one `collect-range-empty` warning names the range.
+
+**The requests.** The read first sends the request [Listing a server's readings](#listing-a-servers-readings) sends, with the input's `datastreams` and `pageSize`. It lists every selected Datastream with its Thing, the Thing's Locations, its ObservedProperty, and its Sensor, without Observations, and the read writes each Datastream into the snapshot. Then it reads the Observations of each data stream with a request of its own:
+
+~~~text
+{root}/Datastreams({id})/Observations?$filter=phenomenonTime%20ge%20{from}%20and%20phenomenonTime%20lt%20{to}&$orderby=phenomenonTime%20asc,id%20asc&$select=id,phenomenonTime,result,resultTime,validTime,resultQuality,parameters&$top={pageSize}
+~~~
+
+The bounds are written in UTC with a `Z`, with a fraction only when they have one, such as `2026-11-11T10:00:00Z` or `2026-11-11T10:00:00.250Z`. A data stream's id is written as `(56776)` for an integer id, or as `('o''neil')` for a text id: in single quotes, with each `'` doubled, percent-encoded where a path cannot hold a character. `$select` asks for the Observation members a record reads and for no other (OGC 18-088 section 9.3.2.2). Without it, a server serves each Observation with links to itself, to its data stream and to its FeatureOfInterest, which no record reads and which make up most of a page. The selection names `id` and `phenomenonTime`, which the request orders by, because some servers refuse a request that orders by a property it does not select. With `featuresOfInterest: true`, each request also expands each Observation's FeatureOfInterest with `$expand`, between `$orderby` and `$select` (see [Features of interest](#features-of-interest)). Each request is followed page by page under the rules of [Reading a server](#reading-a-server). A next link is followed as the server wrote it, so a server whose next link leaves out `$select`, as RIVM Samen Meten's does, serves the later pages with their links. The records are the same. With `historicalLocations: true`, the HistoricalLocations of each listed Thing are read after the Observations (see [Historical locations](#historical-locations)).
+
+**What is read.** The data streams are read one after the other, the Datastreams and then the MultiDatastreams, each by ascending id, whatever order the server listed them in. A data stream's `phenomenonTime` covers all of its Observations, so a data stream whose `phenomenonTime` ends before the range is not requested. One without a `phenomenonTime` is requested. The Observations of each data stream come oldest first, then by id, and each is written once: when a page repeats an Observation the read already wrote, because the server gained rows between pages, the repeat is dropped. The read stops reading Observations once it has written `limits.observations` of them in a cycle, of both kinds together, keeps what it wrote, and reports `collect-limit-reached` with the page that holds the first Observation it did not write. HistoricalLocations are not counted. `limits.pages` stops one data stream's request, and the read goes on with the next one.
+
+**Series output.** A range read gives one record per Observation, so it runs only into output with `output.temporal.representation: "series"`. A run without it is refused with `run-misconfigured` when it is built, before any request (see [Records per read](#records-per-read)).
+
+**Delivery.** Each cycle sends every reading of its range once. Ranges that overlap, or a range read again, send their readings again: a run every hour with `last: "2h"` sends each reading twice, and a broker with `operation: "temporal"` stores it twice. Nothing is kept from one run to the next, so a run that starts late leaves the readings between two ranges unread. Match `last` to the schedule's interval to read each reading about once, or read incrementally to read each reading once (see [Reading new readings](#reading-new-readings)).
+
+### Reading new readings
+
+An incremental read reads every reading each selected data stream gained since the last successful cycle. A scheduled job that keeps a broker's temporal API, or a set of files, up to date with a server then writes each reading once:
+
+~~~json5
+{
+    version: "v1",
+    schedule: { mode: "every", value: "5m" },
+    inputs: [
+        {
+            source: "https://api-samenmeten.rivm.nl/v1.0",
+            format: "sensorthings",
+            mapping: "air-quality-observed.json5",
+            sensorthings: {
+                datastreams: "endswith(name,'ILM_I68-13-pm10')",
+                read: { incremental: { cursor: "rivm-air", initial: "24h", lookback: "1h" } },
+                delay: "200ms",
+            },
+        },
+    ],
+    output: {
+        target: "context-broker",
+        url: "http://localhost:1026/",
+        operation: "temporal",
+        atomicity: "atomic",
+        temporal: { representation: "series" },
+    },
+}
+~~~
+
+`cursor` names the cursor that keeps how far the read has read each data stream, `initial` is where a data stream without a position starts, and `lookback` is how far behind its high-water mark each data stream is read again. [SensorThings settings](./manifests.md#sensorthings-settings) lists their forms and defaults.
+
+**Positions.** A cursor keeps one position per data stream: its high-water mark, the latest reading time written for it, and the Observations written within the lookback behind that mark. A Datastream and a MultiDatastream that share an id keep a position each. With `historicalLocations: true`, it also keeps one position per Thing, by the `time` of its HistoricalLocations (see [Historical locations](#historical-locations)). A cursor is a store named `<cursor>.redb` in the cursors folder, and it records the server it was read from, so an input that reads another server through it is refused, and the error names both servers. Two inputs of one manifest that name one cursor are refused when the manifest loads.
+
+**The requests.** The read first lists the selected data streams, as a range read does, and writes each into the snapshot, whose header records `read: "incremental"`. Then it reads the Observations of each data stream with the request of [Reading a time range](#reading-a-time-range), from a lookback behind its high-water mark, or from `initial` when the cursor holds no position for it, to the cycle start. A reading stamped at or after the cycle start, a forecast among them, waits for a later cycle. The data streams furthest behind are read first, whatever their kind: by ascending start, then Datastreams before MultiDatastreams, then by ascending id. A data stream whose own `phenomenonTime` ends before its start is not requested. An Observation the position already holds, or one this read already wrote, is dropped. Every other one is written.
+
+**Advancing.** A cursor moves only once the whole cycle has succeeded: every reading was written and the run was not stopped. All positions of one cursor then move in one write. A cycle that fails or is stopped leaves its cursors where they were, so the next cycle reads its readings again, and a retried attempt reads from the positions as they were before it. A data stream's high-water mark becomes the latest reading time written for it. When `limits.observations` or `limits.pages` stops a data stream midway, its mark is the last reading it wrote, so the next cycle goes on from there, and each reading a limit left unread is read later, once. The data streams a limit left unread are the furthest behind, so the next cycle reads them first.
+
+**Late readings.** A reading uploaded within the lookback behind its data stream's high-water mark is read once. A reading uploaded later than that is never read: SensorThings gives no entity an insertion time (OGC 18-088 section 8.1), so such a reading cannot be told apart from one already read without reading the whole history again. Choose `lookback` from the server's usual upload delay. A longer lookback requests more Observations every cycle, and drops the ones it already wrote.
+
+**Missing data streams.** A data stream the cursor holds a position for that discovery no longer lists keeps its position, and resumes from it when it is listed again. One `collect-datastreams-missing` warning per server names up to three such data streams by their kind and id, such as `Datastream 56776` or `MultiDatastream 4`, counts them, and gives the earliest cycle start since which one is missing. When `limits.pages` stops the discovery of one kind of data stream, no data stream of that kind is reported missing. A Thing none of whose data streams is listed keeps its position too, and resumes from it when it is listed again; the warning names its data streams, not the Thing.
+
+**Delivery.** What an incremental read writes once depends on the destination:
+
+- A broker with `atomicity: "atomic"`: a failed or stopped cycle sends nothing and moves no cursor, so the next cycle sends its readings once. A reading is sent twice only when the replay of the spool is interrupted after the broker accepted part of it (see [Streaming and atomic delivery](./output.md#streaming-and-atomic-delivery)), or when moving the cursor fails after delivery.
+- A broker with `atomicity: "streaming"`: a failed cycle may already have sent some readings, and the next cycle sends them again.
+- Files: each cycle replaces the files of the output directory with the readings of that cycle. Read the files after each successful cycle. After a failed cycle, the next cycle's files hold its readings again.
+
+**Series output.** An incremental read gives one record per Observation, so, like a range read, it runs only into output with `output.temporal.representation: "series"`, and a run without it is refused when it is built (see [Records per read](#records-per-read)).
+
+**One run at a time.** A run opens the store of every cursor it reads through when it is built and holds it until it ends, scheduled cycles included. A second run that reads through the same cursor is refused with `run-cursor-unusable` before it sends any request, and so is a run whose cursor records another server, another kind of input, or another store format, or whose cursors folder holds a file of the cursor's name that is no cursor store. When a cursor cannot be read before a cycle or moved after it, the cycle fails with the same code.
+
+**The cursors folder.** Cursors are kept in the folder of the `cursors.folder` setting, `CASSIOPEIA_CURSORS__FOLDER` in the environment. It defaults to `cursors` under Cassiopeia's data directory, which is `/var/lib/cassiopeia/cursors` in the container. Keep it on a volume a container outlives (see [Persisting cursors](../reference/docker.md#persisting-cursors)).
+
+**Inspect and reset cursors.** The `cassiopeia sensorthings cursor` commands work on the cursors of the same cursors folder (see the [command-line reference](../reference/cli.md#cassiopeia-sensorthings-cursor)):
+
+~~~sh
+cassiopeia sensorthings cursor list
+cassiopeia sensorthings cursor show rivm-air
+cassiopeia sensorthings cursor reset rivm-air --datastream 56776 --to 6h
+cassiopeia sensorthings cursor reset weather --multi-datastream 4
+cassiopeia sensorthings cursor reset bus --thing 12512
+~~~
+
+- `list` prints one row per SensorThings cursor: its name, its server, how many data streams it holds a position for, and the oldest and newest of their high-water marks. A cursor of another kind of input is left out.
+- `show` prints the cursor's server, then one row per position, Datastreams first, then MultiDatastreams, then Things: its kind, `datastream`, `multi-datastream` or `thing`, its id, its high-water mark, how many Observations or HistoricalLocations it has seen within the lookback, the start of the last cycle that listed it, and the start of the first cycle that no longer listed it, or `-` while it is listed.
+- `reset` without `--to` removes the positions, so the next cycle starts each data stream at `initial` again. Use it to start over.
+- `reset --to` takes an RFC 3339 instant, or a span before now such as `6h`. It sets the high-water marks there and forgets the Observations the data streams have seen, so the next cycle reads each from the target minus the lookback, and writes those readings again. Use it after fixing a mapping, or when the server reloads its history. A target after now is refused, because the data streams would then skip every reading made before it.
+- `--datastream` limits a reset to one Datastream, `--multi-datastream` to one MultiDatastream, and `--thing` to the position of one Thing's HistoricalLocations, its id written as `show` prints it. A Datastream, a MultiDatastream and a Thing that share an id are reset apart, and no two of the options can be given together. An id the cursor holds no position for is refused, and the error names it.
+
+A running job holds its cursors, so a cursor command against one of them fails with `cursor 'rivm-air' is in use by a running job` and changes nothing: stop the job first. `cursor list` reads every cursor in the folder, so it fails this way while any job runs. A cursor command that cannot use a cursor fails with `run-cursor-unusable`, as a run does.
+
+### The snapshot file
+
+A snapshot is UTF-8 JSON Lines: one JSON object per line, each line ended by `\n`. Line 1 is the header:
+
+~~~json
+{"sensorthingsSnapshot":1,"serviceRoot":"https://api-samenmeten.rivm.nl/v1.0","version":"v1.0","read":"latest","collectedAt":"2026-11-12T10:00:00Z"}
+~~~
+
+| Member | Content |
+| --- | --- |
+| `sensorthingsSnapshot` | The snapshot format, `1`. |
+| `serviceRoot` | The server's service root: an `http` or `https` URL without user info, query, or fragment, whose last path segment is the version it serves, written without a trailing slash. |
+| `version` | The SensorThings API version the root serves, `v1.0` or `v1.1`. |
+| `read` | How the read chose its readings: `latest`, the newest reading of every data stream; `range`, every reading of a time range; or `incremental`, every reading since the last read. |
+| `collectedAt` | The instant the read started. |
+
+Every data stream follows, one per line, the Datastreams and then the MultiDatastreams, each as the server served it, with its Thing, the Thing's Locations, what it observes, and its Sensor. In a `latest` read, each one also carries its newest Observation:
+
+~~~json
+{"datastream":{"@iot.id":56776,"name":"ILM_I68-13-pm10","unitOfMeasurement":{"symbol":"ug/m3","definition":"https://qudt.org/vocab/unit/MicroGM-PER-M3"},"Thing":{"@iot.id":12512,"name":"ILM_I68","Locations":[{"@iot.id":36182,"encodingType":"application/vnd.geo+json","location":{"type":"Point","coordinates":[5.608,51.313]}}]},"ObservedProperty":{"@iot.id":1,"name":"pm10","definition":"https://www.eea.europa.eu/help/glossary/eea-glossary/pm10"},"Observations":[{"@iot.id":98765,"phenomenonTime":"2026-11-12T09:00:00Z/2026-11-12T10:00:00Z","result":21.4}]}}
+~~~
+
+A MultiDatastream is a `multiDatastream` line, with its `ObservedProperties`, `unitOfMeasurements` and `multiObservationDataTypes`:
+
+~~~json
+{"multiDatastream":{"@iot.id":4,"name":"ws-7","unitOfMeasurements":[{"symbol":"m/s"},{"symbol":"deg"}],"multiObservationDataTypes":["http://www.opengis.net/def/observationType/OGC-OM/2.0/OM_Measurement","http://www.opengis.net/def/observationType/OGC-OM/2.0/OM_Measurement"],"Thing":{"@iot.id":7},"ObservedProperties":[{"@iot.id":11,"name":"windSpeed"},{"@iot.id":12,"name":"windDirection"}]}}
+~~~
+
+In a `latest` read with `things`, every Thing the read listed follows the data streams, one per line, as the server served it with its Locations:
+
+~~~json
+{"thing":{"@iot.id":12520,"name":"ILM_I75","description":"ILM_I75","Locations":[{"@iot.id":36190,"encodingType":"application/vnd.geo+json","location":{"type":"Point","coordinates":[5.61,51.32]}}]}}
+~~~
+
+In a `range` or `incremental` read, every Observation follows the data streams, one per line, with the id of its data stream under the member of its kind, grouped by data stream:
+
+~~~json
+{"observation":{"@iot.id":98766,"phenomenonTime":"2026-11-12T10:00:00Z","resultTime":null,"result":19.8},"datastream":56776}
+{"observation":{"@iot.id":501,"phenomenonTime":"2026-11-12T10:00:00Z","result":[4.2,270]},"multiDatastream":4}
+~~~
+
+With `historicalLocations: true`, every HistoricalLocation follows the Observations, one per line, as the server served it with its Locations, with the id of its Thing, grouped by Thing:
+
+~~~json
+{"historicalLocation":{"@iot.id":88,"time":"2026-11-12T10:04:00Z","Locations":[{"@iot.id":36190,"encodingType":"application/geo+json","location":{"type":"Point","coordinates":[5.4797,51.4433]}}]},"thing":12512}
+~~~
+
+A read with `featuresOfInterest: true` keeps each FeatureOfInterest inside its Observation, as the server served it: in each observation line of a `range` or `incremental` read, and in each Datastream's `Observations` of a `latest` read. A snapshot recorded without features of interest still reads, and its readings have no `featureOfInterest`.
+
+Each data stream keeps its Sensor inside its line, as the server served it. A snapshot recorded without Sensors still reads, and its readings have no `sensor`.
+
+The source fails when its first line is no header, the header names another snapshot format or a version its service root does not end with, a line is no JSON object of these kinds, a data stream line of either kind follows a thing line, an observation line or a historicalLocation line, a thing line follows an observation line or a historicalLocation line, or an observation line follows a historicalLocation line. A `range` or `incremental` snapshot with a thing line fails too, because only a latest read lists Things, and so does a `latest` snapshot with an observation line or a historicalLocation line. A snapshot without MultiDatastream lines reads as one recorded before MultiDatastreams were read, one without historicalLocation lines as one recorded before HistoricalLocations were read, and one without thing lines as one recorded before Things were listed. The error names the line. A snapshot holds no request header or credential, so it can be shared or kept as a test fixture.
+
+A snapshot is detected from its header line, which must end within the file's first 4 KiB, so it needs no declared format. The snapshot check runs before the JSON check, and a SensorThings response such as `{"value":[...]}` has no header, so it is still read as JSON. A file declared `format: "sensorthings"` whose first line is no header fails, with an error that quotes a header.
+
+### SensorThings records
+
+Every record has this shape. The ids, names, units and definitions are RIVM Samen Meten's; the Observation's id, times, and result are illustrative:
+
+~~~json
+{
+    "server": { "url": "https://api-samenmeten.rivm.nl/v1.0", "host": "api-samenmeten.rivm.nl", "version": "v1.0" },
+    "thing": { "id": 12512, "name": "ILM_I68", "description": "ILM_I68" },
+    "location": { "type": "Point", "coordinates": [5.608, 51.313] },
+    "locations": [
+        { "id": 36182, "encodingType": "application/vnd.geo+json", "location": { "type": "Point", "coordinates": [5.608, 51.313] } }
+    ],
+    "readings": {
+        "pm10": {
+            "id": 98765,
+            "result": 21.4,
+            "time": "2026-11-12T10:00:00Z",
+            "phenomenonTime": "2026-11-12T09:00:00Z/2026-11-12T10:00:00Z",
+            "unit": { "symbol": "ug/m3", "definition": "https://qudt.org/vocab/unit/MicroGM-PER-M3" },
+            "datastream": { "id": 56776, "name": "ILM_I68-13-pm10", "observationType": "http://www.opengis.net/def/observationType/OGC-OM/2.0/OM_Measurement" },
+            "observedProperty": { "id": 1, "name": "pm10", "definition": "https://www.eea.europa.eu/help/glossary/eea-glossary/pm10" }
+        }
+    }
+}
+~~~
+
+| Member | Content |
+| --- | --- |
+| `server.url`, `server.host`, `server.version` | The service root, its host without the port, and its version. |
+| `thing.id`, `.name`, `.description`, `.properties` | The Thing's members. |
+| `location` | The GeoJSON geometry of the Thing's GeoJSON Location with the lowest id. See [Locations](#locations). |
+| `locations` | Every Location of the Thing, in id order, with its members. See [Locations](#locations). |
+| `historicalLocation` | One place the Thing was known at, and when, in the record of a HistoricalLocation, which has no `readings`. See [Historical locations](#historical-locations). |
+| `readings.<key>` | One reading: an Observation of a Datastream, or one value of an Observation of a MultiDatastream, with the data stream it belongs to. See [Reading keys](#reading-keys) and [MultiDatastreams](#multidatastreams). |
+| `.id`, `.result`, `.phenomenonTime`, `.resultTime`, `.validTime`, `.resultQuality`, `.parameters` | The Observation's members, as served. |
+| `.time` | The instant `phenomenonTime` stands for, in UTC. See [Reading times](#reading-times). |
+| `.unit` | The Datastream's `unitOfMeasurement`, or the MultiDatastream's `unitOfMeasurements` entry at the value's position. |
+| `.datastream` | The Datastream's `id`, `name`, `description`, `observationType`, `properties`, `phenomenonTime`, `resultTime`, and `observedArea`. See [Data stream times and area](#data-stream-times-and-area). A reading of a MultiDatastream has `.multiDatastream` in its place. |
+| `.multiDatastream` | The MultiDatastream's `id`, `name`, `description`, `properties`, `phenomenonTime`, `resultTime`, and `observedArea`, the value's `observationType` from `multiObservationDataTypes`, and its `position`, counted from 1. |
+| `.observedProperty` | The ObservedProperty's `id`, `name`, `definition`, `description`, and `properties`: for a MultiDatastream, the one at the value's position. |
+| `.featureOfInterest` | The FeatureOfInterest the Observation was made at, when the read requested it. See [Features of interest](#features-of-interest). |
+| `.sensor` | The Sensor of the data stream, when the server served one. See [Sensors](#sensors). |
+
+Ids keep the JSON type the server sent: an integer id stays a number and a text id stays text. An id of any other type fails the source, naming its line. A member the server leaves out or sends as `null` is absent from the record, at any depth, because NGSI-LD allows no `null` and an absent field produces no attribute. A data stream without a Thing, or without an ObservedProperty with a `name`, fails the source, naming the data stream by its kind and id, such as `Datastream 56776`.
+
+### Records per read
+
+- `latest`: one record per Thing, in the order the snapshot first names it. Its `readings` hold one entry for each of its data streams with an Observation. A Thing whose data streams have none is a record without `readings`, and so is a Thing that only a thing line names, after the Things the data streams name (see [Things without data streams](#things-without-data-streams)).
+- `range` and `incremental`: one record per Observation. An Observation of a Datastream gives exactly one entry in `readings`, and an Observation of a MultiDatastream one entry per value, so values measured together stay in one record. A record whose Observation gives no reading is dropped. With `historicalLocations: true`, each HistoricalLocation then gives one record of its Thing (see [Historical locations](#historical-locations)).
+
+The snapshot is read as a stream: the data streams and the Things a latest read listed are indexed, and each Observation and each HistoricalLocation becomes a record without being held, so a snapshot of any length is read in bounded memory.
+
+A record of a `range` or `incremental` read holds the readings of one Observation, so several records describe one Thing. Without a `temporal` setting, the output keeps one record per entity and mapping, so all but one reading of each Thing would be lost. Such a snapshot is therefore read only into output with `output.temporal.representation: "series"`, which keeps every reading of each Thing as one temporal entity (see [Temporal output](./output.md#temporal-output)). Without it, the run fails with `run-misconfigured` before the snapshot's first record is read, and the error names the snapshot, its read, and the setting it needs. A range or incremental read of a server without it fails when the run is built, before any request, and the error names the service root. A `latest` snapshot is read into every output.
+
+### Reading keys
+
+A reading's key is its ObservedProperty's `name`. When several readings of one Thing observe a property of the same name, the first keeps the name: Datastreams rank before MultiDatastream elements, then by id, then by position. Every other Datastream is keyed `<name>@<data stream id>`, as CSV keys a repeated column `<name>@<column number>`, and every other element `<name>@<MultiDatastream id>/<position>`. One `ingest-readings-renamed` warning per source names up to three such readings and counts the rest. The keys come from the data streams alone, so a reading has the same key in every read.
+
+A key that is not a plain name is read with brackets: `{{ readings['PM2.5'].result }}`, `{{ readings['pm10@9'].result }}`, or `{{ readings['temperature@4/2'].result }}`. [Listing a server's readings](#listing-a-servers-readings) counts, for each name, the Things whose data streams are keyed this way.
+
+### Locations
+
+A Thing usually has one Location, but OGC 18-088 section 8.2.1 lets it have several when its place has more than one representation, each in its own encoding, such as a GeoJSON point beside a room written as text. Every discovery request expands each Thing's Locations, and the snapshot keeps them all as served.
+
+**`location`.** `location` is the geometry of the Thing's GeoJSON Location with the lowest id: the lowest of the Locations whose `encodingType` is `application/geo+json` or the older `application/vnd.geo+json`, compared without regard to case or parameters. Integer ids come before text ids, integers by value and texts by their bytes. A Location whose `location` is a GeoJSON `Feature` gives the Feature's `geometry`. GeoJSON is the only Location encoding the SensorThings API defines, so a Location in another encoding never gives `location`, whatever its id.
+
+A Thing that has Locations and none in GeoJSON has no `location`, and one `ingest-locations-unreadable` warning per source names the first such Thing, its Location with the lowest id and that Location's `encodingType`, and counts every such Thing. A Thing without Locations has no `location`, without a warning.
+
+**`locations`.** Every Location of the Thing, in the order above:
+
+~~~json
+"locations": [
+    {
+        "id": 36182,
+        "name": "Stationsplein 1, Eindhoven",
+        "description": "Roof of the station building",
+        "encodingType": "application/geo+json",
+        "location": { "type": "Point", "coordinates": [5.4797, 51.4433] }
+    },
+    {
+        "id": 36183,
+        "name": "Station building",
+        "encodingType": "text/plain",
+        "location": "Stationsplein 1, 3rd floor, room 3.12"
+    }
+]
+~~~
+
+| Member | Content |
+| --- | --- |
+| `locations[].id`, `.name`, `.description`, `.encodingType`, `.properties` | The Location's members, as served. |
+| `locations[].location` | For a GeoJSON Location, its geometry, read as the record's `location` is. For a Location in any other encoding, its `location` as served. |
+
+Ids keep the JSON type the server sent, and a member that is absent or `null` is left out, as for every member of a record. A Thing without Locations has no `locations`. Every record of a Thing, in every read, carries the same `location` and `locations`.
+
+**Mapping.** A mapping reads a Location's members by position. Smart Data Models write a place's address as an object, so the name of the Thing's first Location goes into its `streetAddress`:
+
+~~~json5
+address: {
+    transformation: "object",
+    mappings: {
+        streetAddress: { source: "{{ locations[0].name }}" },
+    },
+},
+~~~
+
+### Features of interest
+
+`location` is the place of the Thing as the server serves it when the read runs. That fits a station that stays where it is. A Thing that moves, such as a sensor on a bus, a bicycle or a boat, or a kit a volunteer carries around, takes each reading at a place of its own, which SensorThings records as the FeatureOfInterest of the Observation (OGC 18-088 section 8.2.8). Set `featuresOfInterest: true` to read it:
+
+~~~json5
+sensorthings: {
+    datastreams: "startswith(name,'bus-')",
+    read: { range: { last: "24h" } },
+    featuresOfInterest: true,
+},
+~~~
+
+**The requests.** A range or incremental read expands the FeatureOfInterest of each Observation in each data stream's Observations request. An expanded entity is served whole, however the Observation is selected (OGC 18-088 section 9.3.2.2), and some servers, FROST-Server among them, serve it with its own link. A read of a version 1.1 server therefore selects the FeatureOfInterest's members as well, in parentheses (section 9.3.2.1):
+
+~~~text
+{root}/Datastreams({id})/Observations?$filter=phenomenonTime%20ge%20{from}%20and%20phenomenonTime%20lt%20{to}&$orderby=phenomenonTime%20asc,id%20asc&$expand=FeatureOfInterest($select=id,name,description,properties,encodingType,feature)&$select=id,phenomenonTime,result,resultTime,validTime,resultQuality,parameters&$top={pageSize}
+~~~
+
+A FeatureOfInterest has `properties` from version 1.1 on (section 8.2.8), and a version 1.0 server may refuse a request that selects a member it does not define. A read of a version 1.0 server therefore expands each FeatureOfInterest without a selection, `$expand=FeatureOfInterest`, and keeps it as the server serves it. A latest read expands it inside the newest Observation, as OGC 18-088 section 9.3.2.1 allows:
+
+~~~text
+{root}/Datastreams?$filter={datastreams}&$top={pageSize}&$expand=Thing/Locations,ObservedProperty,Sensor,Observations($orderby=phenomenonTime%20desc;$top=1;$expand=FeatureOfInterest)&$orderby=id%20asc
+~~~
+
+Without `featuresOfInterest`, or with `false`, every request is sent without the expansion. Each expansion asks the server for one more join per Observation, which a slow server may not answer within its time limit, and for a fixed station it repeats the Thing's Location on every reading, so leave the setting off for stations.
+
+**Servers that leave it out.** Every Observation has exactly one FeatureOfInterest (OGC 18-088 section 8.2.7), yet a server may serve one without it, and without an error. A server that ignores an `$expand` nested in parentheses, as RIVM Samen Meten does, serves the newest Observation of a latest read without its FeatureOfInterest. OGC 18-088 section 9.3.2.2 selects an expanded entity implicitly, which 52°North SensorThings API 3.3.8 does only when its `implicitExpand` setting is on: otherwise it serves the Observations of a range or incremental read without their FeatureOfInterest (see [Servers differ](#reading-a-server)). Such an Observation, and one served with `"FeatureOfInterest": null`, is written as it was served, its readings have no `featureOfInterest`, and the run goes on. One `collect-features-of-interest-unserved` warning per server names the server and the first such Observation, by its id and its data stream, such as `Observation 70 of Datastream 7`, and counts every one, so a run says when it placed readings at no FeatureOfInterest. A read without `featuresOfInterest` reports nothing.
+
+**The member.** Each reading of an Observation served with its FeatureOfInterest has a `featureOfInterest`:
+
+~~~json
+"featureOfInterest": {
+    "id": 4711,
+    "name": "Line 12, Stationsplein",
+    "description": "Position of the bus when the reading was taken",
+    "feature": { "type": "Point", "coordinates": [5.4797, 51.4433] }
+}
+~~~
+
+| Member | Content |
+| --- | --- |
+| `featureOfInterest.id`, `.name`, `.description`, `.properties` | The FeatureOfInterest's members, as served. |
+| `featureOfInterest.feature` | The GeoJSON geometry of its `feature`, read as a Location is: when its `encodingType` is `application/geo+json` or `application/vnd.geo+json`, compared without regard to case or parameters. A GeoJSON `Feature` gives its `geometry`. |
+
+Ids keep the JSON type the server sent, and a member that is absent or `null` is left out, as for every member of a record, so a FeatureOfInterest served without an id has no `id`. An id that is neither an integer nor a text fails the source, naming its line. A FeatureOfInterest with another encoding, or none, gives no `feature`, and one `ingest-features-of-interest-unreadable` warning per source names the first such FeatureOfInterest, by its id when it has one, and its `encodingType`, and counts the readings that have one. The record's `location` is unchanged: it stays the place of the Thing.
+
+**Mapping.** A mapping places each reading where it was taken. Into output with `output.temporal.representation: "series"`, a range or incremental read of a moving Thing then writes one `location` instance per reading:
+
+~~~json5
+location: {
+    type: "GeoProperty",
+    source: "{{ readings.pm10.featureOfInterest.feature }}",
+    properties: {
+        observedAt: { source: "{{ readings.pm10.time }}", transformation: "datetime" },
+    },
+},
+~~~
+
+A FeatureOfInterest need not be a place the Thing was at: it can be a river reach or a sample. A latest record holds one reading per data stream, each with a FeatureOfInterest of its own. The mapping therefore chooses the place: the Thing's `location`, or a reading's `featureOfInterest.feature`.
+
+### Historical locations
+
+A Thing that moves, such as a bus, a boat or a tracked container, changes its Location, and the server records each place with the time the Thing was known there as a HistoricalLocation (OGC 18-088 section 8.2.3). A record's `location` is the Thing's place when the read runs, and `featuresOfInterest: true` gives the place of each reading. Neither gives the Thing's track: where it went between two readings or while it reported none, where it was when its readings' FeatureOfInterest is no place, such as a river reach, or a history a client loaded into the server. Set `historicalLocations: true` to read it:
+
+~~~json5
+sensorthings: {
+    datastreams: "startswith(name,'bus-')",
+    read: { range: { last: "24h" } },
+    historicalLocations: true,
+},
+~~~
+
+A range or incremental read then reads the HistoricalLocations of every Thing a listed data stream belongs to. The default is `false`. A latest read reads none, because its record's `location` already is the Thing's last known place, so the setting with `read: "latest"`, or without `read`, is refused when the manifest loads, and the error names the setting.
+
+**The requests.** After the Observations, the read requests the HistoricalLocations of each Thing the listed data streams belong to, of either kind, by ascending Thing id, each with its Locations:
+
+~~~text
+{root}/Things({id})/HistoricalLocations?$filter=time%20ge%20{from}%20and%20time%20lt%20{to}&$expand=Locations&$orderby=time%20asc,id%20asc&$top={pageSize}
+~~~
+
+A Thing's id is written as a data stream's is: `(12512)`, or `('bus-12')` for a text id. A range read uses the range's bounds. An incremental read uses, for each Thing, the bounds it uses for a data stream: from a lookback behind the Thing's high-water mark, or from `initial` when the cursor holds no position for it, to the cycle start. Each request is followed page by page under the rules of [Reading a server](#reading-a-server): `limits.pages` stops one Thing's request and the read goes on with the next Thing, and `delay` spaces every request. `limits.observations` counts Observations only, so the HistoricalLocations are read after it stops the Observations. A HistoricalLocation that a page repeats, or that the Thing's position already holds, is dropped, as an Observation is.
+
+**Cursors.** An incremental read keeps one position per Thing for its HistoricalLocations, by their `time`, beside the positions of the data streams, and moves it with them once the cycle succeeds. `cassiopeia sensorthings cursor show` lists it with the kind `thing`, and `cassiopeia sensorthings cursor reset --thing <ID>` resets it alone (see [Reading new readings](#reading-new-readings)). A Thing that is no longer listed keeps its position and resumes from it when it is listed again; its data streams are reported by `collect-datastreams-missing`.
+
+**The records.** Each HistoricalLocation gives one record, after the records of the Observations, with the Thing's `server`, `thing`, `location` and `locations`, a `historicalLocation`, and no `readings`:
+
+~~~json
+{
+    "server": { "url": "https://h.example/v1.1", "host": "h.example", "version": "v1.1" },
+    "thing": { "id": 12512, "name": "bus-12" },
+    "location": { "type": "Point", "coordinates": [5.4801, 51.4410] },
+    "locations": [
+        { "id": 36191, "encodingType": "application/geo+json", "location": { "type": "Point", "coordinates": [5.4801, 51.4410] } }
+    ],
+    "historicalLocation": {
+        "id": 88,
+        "time": "2026-11-12T10:04:00Z",
+        "location": { "type": "Point", "coordinates": [5.4797, 51.4433] }
+    }
+}
+~~~
+
+| Member | Content |
+| --- | --- |
+| `historicalLocation.id` | The HistoricalLocation's id, as served. |
+| `historicalLocation.time` | Its `time`, in UTC, written as a reading's `time` is: at most six fractional digits, without a fraction of zero. |
+| `historicalLocation.location` | The geometry of its Locations, chosen and read as the record's `location` is: that of its GeoJSON Location with the lowest id (see [Locations](#locations)). |
+
+A HistoricalLocation whose `time` is not an instant with a date, a time and a UTC offset, or that has no Location, or none in GeoJSON, gives no record. One `ingest-historical-locations-unreadable` warning per source names the first such HistoricalLocation, its Thing and what could not be read: its `time`, or its Location with the lowest id and that Location's `encodingType`. It counts every one. A HistoricalLocation whose GeoJSON Location with the lowest id holds no geometry gives a `historicalLocation` without `location`, without a warning.
+
+**Mapping.** Into output with `output.temporal.representation: "series"`, a mapping writes the Thing's track as `location` instances:
+
+~~~json5
+location: {
+    type: "GeoProperty",
+    source: "{{ historicalLocation.location }}",
+    properties: {
+        observedAt: { source: "{{ historicalLocation.time }}", transformation: "datetime" },
+    },
+},
+~~~
+
+A record of an Observation has no `historicalLocation`, so this attribute is left out of it, and the attributes that read `readings` are left out of a HistoricalLocation's record. A series run checks a member a schema requires at the top level, such as `location` and `dateObserved` in `AirQualityObserved`, on the entity it writes, which holds both (see [Series output](./validation.md#series-output)).
+
+### Things without data streams
+
+A latest read finds Things through their data streams: it gives one record for each Thing that has at least one selected data stream. A Thing may have none (OGC 18-088 section 8.2.1), such as a station installed before its sensors are connected, or one whose data streams were removed, so a mapping that keeps an inventory of a server's stations misses it. Set `things` to list Things by themselves:
+
+~~~json5
+sensorthings: {
+    datastreams: "startswith(name,'ILM_')",
+    things: "startswith(name,'ILM_')",
+},
+~~~
+
+| `things` | Lists |
+| --- | --- |
+| absent or `false` | No Thing beyond the Things of the selected data streams. The default. |
+| `true` | Every Thing. |
+| an OData `$filter` expression over Things | The Things it matches, such as `startswith(name,'ILM_')`, sent and checked as `datastreams` is. |
+
+Only a latest read lists Things. A range or incremental read gives one record per Observation, and a Thing without data streams has none, so `things: true` or an expression with a range or incremental read is refused when the manifest loads, and the error names the setting and the read.
+
+**The request.** After its data stream requests, a latest read lists the Things, each with its Locations, in id order:
+
+~~~text
+{root}/Things?$filter={things}&$top={pageSize}&$expand=Locations&$orderby=id%20asc
+~~~
+
+`$filter` is sent only for an expression, percent-encoded as a `datastreams` filter is. The request is followed page by page under the rules of [Reading a server](#reading-a-server): `delay` spaces it from the requests before it, and `limits.pages` stops it, keeping the Things it listed, with one `collect-limit-reached` warning that names the next link. Without `things`, no Things request is sent. RIVM Samen Meten holds tens of thousands of Things, so select them by an expression there.
+
+**The snapshot.** Each Thing listed is a `thing` line after the data stream lines, as the server served it with its Locations (see [The snapshot file](#the-snapshot-file)).
+
+**The records.** A Thing a data stream line names gives the record it gives without `things`, once, whether or not a thing line names it too. Each other Thing listed gives one record, with `server`, `thing`, `location` and `locations`, and without `readings`, after the records of the Things the data streams name, in the order of the thing lines. Its `location` and `locations` are read from its Locations as any Thing's are (see [Locations](#locations)). The ids, names and places are illustrative:
+
+~~~json
+{
+    "server": { "url": "https://h.example/v1.1", "host": "h.example", "version": "v1.1" },
+    "thing": { "id": 2, "name": "Kennedylaan", "description": "Air quality station Kennedylaan" },
+    "location": { "type": "Point", "coordinates": [5.4812, 51.4402] },
+    "locations": [
+        { "id": 201, "encodingType": "application/geo+json", "location": { "type": "Point", "coordinates": [5.4812, 51.4402] } }
+    ]
+}
+~~~
+
+**Mapping.** A mapping that keeps an inventory of a server's stations reads only the Thing's parts, so a Thing without data streams gives the same entity as any other:
+
+~~~json5
+{
+    version: "v4",
+    dataModel: "dataModel.Device/Device",
+    identity: { entityName: "sta-{{ server.host }}-{{ thing.id }}" },
+    attributes: {
+        name: { source: "{{ thing.name }}" },
+        description: { source: "{{ thing.description }}" },
+        location: { type: "GeoProperty", source: "{{ location }}" },
+    },
+}
+~~~
+
+A mapping that also writes readings leaves their attributes out of the entity of a Thing without data streams, and a schema that requires one, as `AirQualityObserved` requires `dateObserved`, finds it missing. [Listing a server's readings](#listing-a-servers-readings) lists readings, which a Thing without data streams has none of, so it is the same with or without `things`.
+
+### Sensors
+
+Each data stream links the Sensor that makes its readings (OGC 18-088 section 8.2.5): the instrument or procedure, with a `name`, a `description`, an `encodingType`, and `metadata`, which is often the URL of a datasheet or of a SensorML description. Every discovery request expands it beside the ObservedProperty, so a read asks for each Sensor once per data stream, whatever the number of its Observations, and the snapshot keeps it inside its Datastream line.
+
+**The member.** Each reading of a data stream served with its Sensor has a `sensor`:
+
+~~~json
+"sensor": {
+    "id": 7,
+    "name": "PM-200",
+    "description": "Optical particulate matter sensor",
+    "encodingType": "application/pdf",
+    "metadata": "https://sensors.example.org/pm-200.pdf"
+}
+~~~
+
+| Member | Content |
+| --- | --- |
+| `sensor.id`, `.name`, `.description`, `.encodingType`, `.properties` | The Sensor's members, as served. |
+| `sensor.metadata` | The Sensor's `metadata`, as served: text or JSON. Cassiopeia does not fetch or parse what it points to. |
+
+Ids keep the JSON type the server sent, and a member that is absent or `null` is left out, as for every member of a record, so a Sensor served without an id has no `id`. An id that is neither an integer nor a text fails the source, naming its line. A data stream served without a Sensor gives readings without `sensor`, and the read goes on.
+
+**Mapping.** Smart Data Models describe an instrument as a `Device`, and observation models such as `AirQualityObserved` link it through `refDevice`. A mapping links each observation to a `Device` that describes the Sensor of one of its readings with a [synthetic entity](./mapping.md#emit-a-related-entity):
+
+~~~json5
+refDevice: {
+    type: "Relationship",
+    syntheticEntity: {
+        dataModel: "dataModel.Device/Device",
+        identity: { entityName: "sta-{{ server.host }}-sensor-{{ readings.pm10.sensor.id }}" },
+        attributes: {
+            name: { source: "{{ readings.pm10.sensor.name }}" },
+            description: { source: "{{ readings.pm10.sensor.description }}" },
+        },
+    },
+},
+~~~
+
+For Sensor 7 of `https://h.example/v1.1`, the Device is `urn:ngsi-ld:Device:sta-hexample-sensor-7`. A record without `readings.pm10`, or whose reading has no `sensor`, writes neither the Device nor the link, and the observation is still written.
+
+### Data stream times and area
+
+A Datastream may carry three members that sum up all of its Observations (OGC 18-088 section 8.2.4), and a MultiDatastream the same three (section 12). A server that keeps them, such as FROST-Server, updates them as Observations are added. Each reading carries them in its `datastream`, or in its `multiDatastream`, as served:
+
+| Member | Content |
+| --- | --- |
+| `.phenomenonTime` | The interval of the phenomenon times of all of the data stream's Observations, such as `2026-11-01T00:00:00Z/2026-11-12T10:00:00Z`. |
+| `.resultTime` | The interval of their result times. |
+| `.observedArea` | The area of the FeaturesOfInterest of its Observations, as the GeoJSON geometry the server served: a Polygon, or a Point for a station that stays in one place. |
+
+A member that is absent or `null` is left out, as for every member of a record. RIVM Samen Meten serves `observedArea` alone. No request and no snapshot line changes for them: the discovery requests return them, and each data stream line keeps them as served, so a snapshot that holds them gives them whenever it was recorded. In a `range` or `incremental` read, the members are the data stream's as the server listed it in that cycle, not as they were when an Observation was made, so every reading of one data stream in a cycle carries the same ones.
+
+**Mapping.** A `Device` that describes a station writes when it last reported from the end of its `pm10` data stream's `phenomenonTime`:
+
+~~~json5
+dateLastValueReported: {
+    source: "{% if readings.pm10.datastream.phenomenonTime %}{{ readings.pm10.datastream.phenomenonTime | split(pat='/') | last }}{% endif %}",
+    transformation: "datetime",
+},
+~~~
+
+The end of an interval is the instant after its `/`, and an instant holds no `/`, so `last` gives it whole. The filters fail on a missing field, so the `if` guards them: a record whose reading has no `phenomenonTime` writes no `dateLastValueReported`, without a warning.
+
+### MultiDatastreams
+
+A MultiDatastream, of the MultiDatastream extension of the SensorThings API (OGC 18-088 section 12), groups properties measured together into one data stream, such as the wind speed and wind direction of a weather station, or the temperature, conductivity and depth of a water sensor. Each of its Observations holds one `result` array, whose values correspond, in order, to the MultiDatastream's `ObservedProperties`, to its `unitOfMeasurements`, and to its `multiObservationDataTypes`. FROST-Server serves the extension when it is enabled. 52°North SensorThings API 3.3.8 and istSOS4 1.3 do not serve it.
+
+**The setting.** `datastreams` selects Datastreams only. `multiDatastreams` selects the MultiDatastreams a read reads:
+
+| `multiDatastreams` | Selects |
+| --- | --- |
+| absent or `false` | No MultiDatastream. |
+| `true` | Every MultiDatastream. |
+| an OData `$filter` expression | The MultiDatastreams it matches, sent as `datastreams` is. |
+
+~~~json5
+sensorthings: {
+    datastreams: "startswith(name,'ws-')",
+    multiDatastreams: "startswith(name,'ws-')",
+    read: { range: { last: "24h" } },
+},
+~~~
+
+A filter written for Datastreams can name `ObservedProperty`, which a MultiDatastream lacks, so each kind has a filter of its own. A manifest without `multiDatastreams` sends no request to the MultiDatastreams collection.
+
+**The requests.** A read that selects MultiDatastreams sends the requests it sends for Datastreams to the MultiDatastreams collection as well, with `ObservedProperties` in place of `ObservedProperty`. A latest read sends:
+
+~~~text
+{root}/MultiDatastreams?$filter={multiDatastreams}&$top={pageSize}&$expand=Thing/Locations,ObservedProperties,Sensor,Observations($orderby=phenomenonTime%20desc;$top=1)&$orderby=id%20asc
+~~~
+
+A range or incremental read lists the selected MultiDatastreams:
+
+~~~text
+{root}/MultiDatastreams?$filter={multiDatastreams}&$top={pageSize}&$expand=Thing/Locations,ObservedProperties,Sensor&$orderby=id%20asc
+~~~
+
+It then reads the Observations of each with `{root}/MultiDatastreams({id})/Observations`, under the filter, order, selection, paging and limits of a Datastream's Observations request. `$filter` is sent only for an expression, and `featuresOfInterest: true` expands each FeatureOfInterest as it does for a Datastream. A range read reads the Datastreams, then the MultiDatastreams, each by ascending id. An incremental read reads the data streams of both kinds furthest behind first. `limits.observations` counts the Observations of both kinds. A server without the extension answers the MultiDatastreams request with an HTTP error, and the input fails with that answer, as for any failed request.
+
+**Readings.** Each value of a MultiDatastream Observation's `result` is one reading, keyed by the `name` of the ObservedProperty at its position:
+
+~~~json
+"windSpeed": {
+    "id": 501,
+    "result": 4.2,
+    "time": "2026-11-12T10:00:00Z",
+    "phenomenonTime": "2026-11-12T10:00:00Z",
+    "unit": { "name": "metre per second", "symbol": "m/s", "definition": "http://qudt.org/vocab/unit/M-PER-SEC" },
+    "multiDatastream": { "id": 4, "name": "ws-7", "observationType": "http://www.opengis.net/def/observationType/OGC-OM/2.0/OM_Measurement", "position": 1 },
+    "observedProperty": { "id": 11, "name": "windSpeed" }
+}
+~~~
+
+| Member | Content |
+| --- | --- |
+| `.result` | The value of the Observation's `result` array. |
+| `.unit` | The `unitOfMeasurements` entry at the value's position. |
+| `.observedProperty` | The ObservedProperty at the value's position. |
+| `.multiDatastream` | Present in place of `.datastream`: the MultiDatastream's `id`, `name`, `description`, `properties`, `phenomenonTime`, `resultTime` and `observedArea`, the value's `observationType` from `multiObservationDataTypes`, and its `position`, counted from 1. Its `phenomenonTime`, `resultTime` and `observedArea` sum up all of the MultiDatastream's Observations (see [Data stream times and area](#data-stream-times-and-area)). |
+
+Every other member of the reading, such as `id`, `time`, `phenomenonTime`, `resultTime`, `featureOfInterest` and `sensor`, is the Observation's or the MultiDatastream's, shared by its values, and is read as for a Datastream.
+
+**Records.** A `latest` read gives one record per Thing, holding the readings of its Datastreams and of the values of its MultiDatastreams. A `range` or `incremental` read gives one record per Observation: an Observation of a MultiDatastream gives one record holding one reading per value, so values measured together stay in one record and a mapping reads them side by side.
+
+**Keys.** When several readings of one Thing share a name, Datastreams rank before MultiDatastream values, then by id, then by position. The first keeps the name. A later Datastream is keyed `<name>@<data stream id>`, and a later value `<name>@<MultiDatastream id>/<position>`, read as `{{ readings['temperature@4/2'].result }}` (see [Reading keys](#reading-keys)).
+
+**Unreadable MultiDatastreams.**
+
+- A MultiDatastream whose ObservedProperties, `unitOfMeasurements` and `multiObservationDataTypes` differ in number fails the source, naming the MultiDatastream and how many of each it holds. One without ObservedProperties, or with one without a `name`, fails it as a Datastream without a named ObservedProperty does.
+- An Observation whose `result` is not an array with one value per ObservedProperty gives no readings, and in a `range` or `incremental` read its record is dropped. One `ingest-multi-results-unreadable` warning per source names the first such Observation and its MultiDatastream, and counts every one.
+- A value that is `null` gives no reading, as an absent member gives none. An Observation all of whose values are `null` gives no record in a `range` or `incremental` read.
+
+**Unread MultiDatastreams.** A run whose input reads no MultiDatastreams checks once, in its first cycle, whether its server holds any: it reads the service root, and when the root lists the MultiDatastreams collection, it requests `{root}/MultiDatastreams?$top=1`. When that gives one, one `collect-multi-datastreams-unread` warning names the server and says that `multiDatastreams` selects them. The check costs at most two requests, and one that fails reports nothing and fails nothing.
+
+**Cursors.** An incremental read keeps one position per MultiDatastream, apart from the position of a Datastream with the same id. `cassiopeia sensorthings cursor show` prints each position's kind, `datastream` or `multi-datastream`, and `cassiopeia sensorthings cursor reset --multi-datastream <ID>` resets one MultiDatastream (see [Reading new readings](#reading-new-readings)).
+
+**Mapping.** A mapping reads a value as it reads a Datastream's reading, by its key:
+
+~~~json5
+windSpeed: {
+    source: "{{ readings.windSpeed.result }}",
+    transformation: "float",
+    properties: {
+        observedAt: { source: "{{ readings.windSpeed.time }}", transformation: "datetime" },
+        unitCode: { source: "{% if readings.windSpeed %}{{ readings.windSpeed.unit | cefact_unit }}{% endif %}" },
+    },
+},
+~~~
+
+A server's ObservedProperties of a MultiDatastream are served in the order of the values of its results. Check the order a server serves with a latest read before mapping a value by its name.
+
+### Reading times
+
+`time` is the instant a reading's `phenomenonTime` stands for, written in UTC: the instant itself, or the end of a `start/end` interval, when the reading was complete. It keeps at most six fractional digits, the microsecond precision NGSI-LD uses, and leaves out a fraction of zero, so `2026-11-12T11:00:00.000Z` becomes `2026-11-12T11:00:00Z` and `2026-11-12T12:00:00+02:00` becomes `2026-11-12T10:00:00Z`. Use it as an attribute's `observedAt`.
+
+An instant needs a date, a time, and a UTC offset. A `phenomenonTime` that is neither an instant nor an interval of two instants, such as `2026-11-12` or `2026-11-12T09:00:00Z/PT1H`, cannot be an `observedAt`, so its reading is dropped. In a `range` or `incremental` read, the record of that Observation is dropped with it. One `ingest-phenomenon-times-unreadable` warning per source quotes the first such text and counts every dropped reading.
+
+### Listing a server's readings
+
+Before writing a mapping, list the readings a server offers:
+
+~~~sh
+cassiopeia sensorthings readings https://iot.example.org/sta/v1.1
+~~~
+
+The command prints one row per ObservedProperty name, sorted by name, with the columns aligned:
+
+~~~text
+reading        unit          unit code  data streams  multi data streams  things with repeats
+no2            ug/m3         GQ         96            0                   0
+pm10           ug/m3, µg/m³  GQ         412           0                   3
+status         none          none       12            0                   0
+windDirection  deg           DD         0             8                   0
+windSpeed      m/s           MTS        0             8                   0
+~~~
+
+| Column | Content |
+| --- | --- |
+| `reading` | The ObservedProperty name, which a mapping reads as `readings.<name>`. |
+| `unit` | The distinct texts of the readings' units: each `unitOfMeasurement`'s, or `unitOfMeasurements` entry's, `symbol`, else its `name`, else its `definition`, which is the text `cefact_unit` writes for a unit it does not resolve. `none` when no unit has a text, as for readings that have no unit. |
+| `unit code` | The UN/CEFACT codes [`cefact_unit`](./templates.md#unit-codes) resolves those units to, or `unknown` for a unit it does not resolve. |
+| `data streams` | The number of Datastreams of the name. |
+| `multi data streams` | The number of MultiDatastreams with a value of the name. |
+| `things with repeats` | The number of Things that hold more than one reading of the name. Their extra readings are read under `<name>@<data stream id>` or `<name>@<MultiDatastream id>/<position>` keys (see [Reading keys](#reading-keys)). |
+
+`--datastreams` selects the Datastreams listed with a filter, as `datastreams` does in an input's `sensorthings` block, `--multi-datastreams` selects the MultiDatastreams listed, as `multiDatastreams` does, and `--input-header` sends a header with every request, as an input's `headers` do. The service root carries no credentials. The command reads the server as a run does, with every other setting at its default: it follows one request page by page under the rules of [Paging](#reading-a-server) and fails with a run's errors. The request asks for each Datastream with its Thing, the Thing's Locations, its ObservedProperty, and its Sensor, without Observations:
+
+~~~text
+{root}/Datastreams?$filter={datastreams}&$top=1000&$expand=Thing/Locations,ObservedProperty,Sensor&$orderby=id%20asc
+~~~
+
+The command then reads the server's service root, and when the root lists the MultiDatastreams collection, it lists every MultiDatastream, or those `--multi-datastreams` selects, with the listing request of [MultiDatastreams](#multidatastreams), each value a reading under the name of its ObservedProperty. A server whose root lists no MultiDatastreams is sent no MultiDatastreams request.
+
+When `limits.pages` stops a listing, the table lists the data streams read before it, and a note on standard error names the next link that was not followed. A data stream without a Thing, or without an ObservedProperty with a `name`, fails the command and is named, as it fails a run, and so does a MultiDatastream whose members differ in number. RIVM Samen Meten holds tens of thousands of data streams, so select them by name there, as for a read.
+
+### Mapping a SensorThings record
+
+The same mapping serves every read:
+
+~~~json5
+{
+    version: "v4",
+    dataModel: "dataModel.Environment/AirQualityObserved",
+    identity: {
+        entityName: "sta-{{ server.host }}-{{ thing.id }}",
+    },
+    attributes: {
+        name: { source: "{{ thing.name }}" },
+        location: { type: "GeoProperty", source: "{{ location }}" },
+        dateObserved: {
+            source: "{% if readings.pm10 %}{{ readings.pm10.time }}{% elif readings.pm25_kal %}{{ readings.pm25_kal.time }}{% endif %}",
+            transformation: "datetime",
+        },
+        pm10: {
+            source: "{{ readings.pm10.result }}",
+            transformation: "float",
+            properties: {
+                observedAt: { source: "{{ readings.pm10.time }}", transformation: "datetime" },
+                unitCode: { source: "{% if readings.pm10 %}{{ readings.pm10.unit | cefact_unit }}{% endif %}" },
+            },
+        },
+        pm25: {
+            source: "{{ readings.pm25_kal.result }}",
+            transformation: "float",
+            properties: {
+                observedAt: { source: "{{ readings.pm25_kal.time }}", transformation: "datetime" },
+                unitCode: { source: "{% if readings.pm25_kal %}{{ readings.pm25_kal.unit | cefact_unit }}{% endif %}" },
+            },
+        },
+    },
+}
+~~~
+
+On a record without `readings.pm10`, the plain references resolve to nothing, so `pm10` is left out without a warning. Every [`cefact_unit`](./templates.md#unit-codes) is guarded by an `if`, because a filter fails on a missing field and qualifiers are resolved even when their attribute's source is not. The filter turns RIVM's `ug/m3` into the UN/CEFACT code `GQ`. The identity cleaner keeps only letters, digits, `-`, and `_`, so the identity becomes `urn:ngsi-ld:AirQualityObserved:sta-api-samenmetenrivmnl-12512`.
+
+## GeoJSON
+
+Cassiopeia supports GeoJSON `FeatureCollection` documents and single GeoJSON `Feature` documents. Each feature becomes one record. When the corresponding source members are present, the record has this shape:
+
+~~~json
+{
+    "id": "A-17",
+    "properties": {
+        "name": "Main station"
+    },
+    "geometry": {
+        "type": "Point",
+        "coordinates": [
+            14.51,
+            46.05
+        ]
+    },
+    "bbox": [
+        14.50,
+        46.04,
+        14.52,
+        46.06
+    ]
+}
+~~~
+
+Cassiopeia copies the feature ID to `id`, copies `properties` as an object, and copies `geometry` as a GeoJSON geometry. It also copies `bbox` when present. A feature of a `FeatureCollection` also carries its collection's members under `featureCollection` (see [Collection members](#collection-members)). A geometry-only GeoJSON document is not accepted as a source collection.
+
+RFC 7946 lets a feature's geometry be a `GeometryCollection`, which NGSI-LD does not admit as a GeoProperty value. Such a feature produces no GeoProperty: the attribute is dropped and the run counts a warning, unless the mapping sets `geometry.convert` to `flatten` to fold the collection into one geometry. A plain `Property` with `transformation: "geometry"` keeps the collection as its GeoJSON object instead (see [GeoProperty](./mapping.md#geoproperty)).
+
+The source geometry is ready to use as an NGSI-LD `GeoProperty`, which keeps the geometry as read without a transformation:
+
+~~~json5
+location: {
+    type: "GeoProperty",
+    source: "{{ geometry }}",
+}
+~~~
+
+Properties remain under `properties`, so a source field called `name` is addressed as `{{ properties.name }}`. Cassiopeia does not automatically use the feature ID as the NGSI-LD entity ID. Use it explicitly in `identity.entityName` when you want that identity.
+
+### Collection members
+
+Some sources state a value once for the whole `FeatureCollection` instead of repeating it on every feature, such as an observation time shared by every reading. RFC 7946 section 6.1 calls such members foreign members. Cassiopeia gives every feature's record its collection's foreign members and its `bbox`, when present, under `featureCollection`, much as a KML placemark carries the folder that encloses it. The collection's `type` is always `FeatureCollection` and its `features` are the records themselves, so neither is copied. A feature's own `bbox` stays at the top level of its record, beside the collection's.
+
+This collection states its observation time once, in `timestamps`:
+
+~~~json
+{
+    "type": "FeatureCollection",
+    "timestamps": ["2026-10-25T07:50+00:00"],
+    "features": [
+        {
+            "type": "Feature",
+            "geometry": {"type": "Point", "coordinates": [16.37, 48.2]},
+            "properties": {"station": "11034", "parameters": {"TL": {"data": [6.9]}}}
+        }
+    ]
+}
+~~~
+
+Each reading then takes its observation time from the collection:
+
+~~~json5
+temperature: {
+    source: "{{ properties.parameters.TL.data | first }}",
+    transformation: "float",
+    properties: {
+        observedAt: {
+            source: "{{ featureCollection.timestamps | first }}",
+            transformation: "datetime",
+        },
+    },
+}
+~~~
+
+A collection with no foreign members and no `bbox` gives its features an empty `featureCollection`. A single `Feature` document has no collection, so its record has no `featureCollection`, and a template that reads it resolves to nothing, like any missing field.
+
+## KML and KMZ
+
+KML and KMZ are geospatial document formats, with KMZ being the zipped form of KML. Cassiopeia walks nested `Document` and `Folder` structures and emits one record for each `Placemark`.
+
+A placemark record has the same general shape as a GeoJSON feature. This placemark sits in a folder named `Stations`, so its data is nested under the folder's snake-case name, `stations` (see [Folders and collections](#folders-and-collections)):
+
+~~~json
+{
+    "stations": {
+        "id": "station-17",
+        "properties": {
+            "folder": "Stations",
+            "name": "Main station",
+            "description": "Central platform",
+            "timeStamp": "2026-08-03T10:00:00Z",
+            "temperature": "21.5"
+        },
+        "geometry": {
+            "type": "Point",
+            "coordinates": [
+                14.51,
+                46.05
+            ]
+        }
+    }
+}
+~~~
+
+A mapping reads this placemark's name as `{{ stations.properties.name }}`. A placemark outside any folder has `id`, `properties`, and `geometry` at the top level of the record, with no `folder` member, and its name is `{{ properties.name }}`.
+
+Cassiopeia places the placemark's `name`, `description`, time (see below), and extended data in `properties`, along with the name of its folder as `folder`. Its `id` attribute becomes `id`, and supported KML geometry becomes GeoJSON under `geometry`. A KML `LinearRing` becomes a GeoJSON `LineString`, matching the source semantics of a standalone ring.
+
+A KML `MultiGeometry` may mix geometry kinds, which GeoJSON's multi-geometries cannot. Cassiopeia folds one into the multi-geometry of its members' family: a single member becomes that geometry, points become a `MultiPoint`, line strings and linear rings a `MultiLineString`, polygons a `MultiPolygon`, and a nested `MultiGeometry` contributes its own members to the same fold. A `MultiGeometry` mixing families has no GeoJSON equivalent and produces no `geometry` key, exactly like a KML geometry kind GeoJSON does not describe.
+
+### Placemark times
+
+KML dates a placemark with a time primitive, and Cassiopeia carries it into `properties` so a mapping can use it. A `<TimeStamp>` becomes `timeStamp`, holding the value of its `<when>`. A `<TimeSpan>` becomes a `timeSpan` object holding whichever of `begin` and `end` the span declares, so an open-ended span has only one of them. A dated KML export can therefore feed a temporal mapping directly, with `{{ properties.timeStamp }}` as the source of `observedAt`, or `{{ properties.timeSpan.begin }}` and `{{ properties.timeSpan.end }}` as the bounds of an observation window. For a placemark inside a folder, the same values sit under the folder's namespace, such as `{{ stations.properties.timeStamp }}`.
+
+Cassiopeia copies the values as written, trimming only surrounding whitespace, and keeps them as strings. An empty `<when>`, or a span without a non-empty bound, adds nothing. Extended data with the same name as `timeStamp` or `timeSpan` takes precedence, as it does over `name` and `description`. Only a placemark's own time primitive is read. One declared on an enclosing `Folder` or `Document` is not applied to the placemarks inside it, and the `<when>` elements of a `gx:Track` are not read.
+
+KML allows a full date and time with or without a UTC offset, a date, a year and month, or a year alone. Declare `transformation: "datetime"` on the attribute or `observedAt` that reads one. That transformation reads a date and time with a UTC offset or `Z`, such as `2026-08-03T10:00:00Z`, and reads a date alone, such as `2026-08-03`, as midnight UTC. It does not read a year alone, a year and month, or a `T`-separated date and time without an offset, such as `2026-08-03T10:00:00`. An attribute with such a value is dropped, and an `observedAt` with one is left off its attribute, and the run warns in both cases. When the source writes these shapes, map the attribute without a transformation to keep the value as a string.
+
+### Folders and collections
+
+A placemark inside a folder carries that folder's name as its collection label. Cassiopeia preserves the original folder name, including spaces and capitalization, so a manifest can route different folders to different mappings. It also nests folder data under a snake-case namespace in the record. For example, a folder named `Camera Area` is available through `camera_area`, as in `{{ camera_area.properties.name }}`. In nested folders, the innermost named folder supplies both the label and the namespace.
+
+A placemark outside a folder has no collection label. A mapping binding that expects a collection cannot match it.
+
+## XML
+
+Generic XML is deliberately schema-less. Cassiopeia folds the XML tree into JSON-like values and uses one deterministic rule to split records. It does not guess which element represents a record.
+
+### XML value shape
+
+An element with only text becomes a string. An empty element becomes `null`. An element with attributes, children, or processing instructions becomes an object:
+
+~~~xml
+<station code="A-17">Main station</station>
+~~~
+
+~~~json
+{
+    "station": {
+        "@code": "A-17",
+        "#text": "Main station"
+    }
+}
+~~~
+
+XML attributes use an `@` prefix. Text in a mixed-content object uses `#text`, and processing instructions use `#pi`. Cassiopeia keeps namespace prefixes in element and attribute names.
+
+### Record splitting
+
+If the root has exactly one repeated child element directly beneath it, each occurrence becomes a record. For example:
+
+~~~xml
+<data>
+    <station><id>A-17</id><name>Main station</name></station>
+    <station><id>A-18</id><name>North station</name></station>
+</data>
+~~~
+
+This produces records with `id` and `name` fields, so a mapping can use `{{ id }}` and `{{ name }}` directly.
+
+If the root has no repeated child, the whole root becomes one record. If it has two or more repeated child names, Cassiopeia also keeps the whole root as one record instead of choosing one repeated element arbitrarily. A repeated element under an intermediate wrapper is not used as the split point. When the source structure does not identify a record boundary unambiguously, Cassiopeia preserves the structure for the mapping to handle.
+
+When a repeated child is a scalar rather than an object, its record contains the value under `#text`:
+
+~~~xml
+<data><value>21.5</value><value>20.9</value></data>
+~~~
+
+Each record therefore has a `#text` member containing `21.5` or `20.9`.
+
+## ESRI Shapefile
+
+A Shapefile source can be a local `.shp` main file with its companion files beside it, or a ZIP bundle containing one or more layers and their companions. Cassiopeia reads the feature geometry and dBase attributes, then emits one record per feature.
+
+Each record has this general shape:
+
+~~~json
+{
+    "properties": {
+        "NAME": "Main station",
+        "ACTIVE": true,
+        "VALUE": 21.5
+    },
+    "geometry": {
+        "type": "Point",
+        "coordinates": [
+            14.51,
+            46.05
+        ]
+    }
+}
+~~~
+
+dBase fields are under `properties`. Cassiopeia converts their values to JSON where possible: character and memo fields become strings, numeric fields become numbers, logical fields become booleans, and date fields become ISO-style date strings. It omits null fields. dBase tooling may uppercase field names, so inspect the actual property names when writing a mapping.
+
+### Geometry and coordinate reference systems
+
+Shapefile geometries are emitted as GeoJSON for use as NGSI-LD `GeoProperty` values. When a `.prj` companion is present, Cassiopeia parses its coordinate reference system and reprojects the geometry to EPSG:4326, using WGS84 longitude and latitude. A coordinate the reprojection does not move, as under a WGS84 or an ETRS89 `.prj`, is emitted exactly as the shapefile stores it. Without a `.prj` file, it assumes the coordinates are already EPSG:4326 and emits them unchanged.
+
+The `.dbf` companion is required because it carries the feature attributes. A bare `.shp` without its required companion files is not a complete input.
+
+### Multiple layers
+
+A ZIP containing one Shapefile layer produces ordinary records without a collection label. A ZIP containing several `.shp` layers gives each layer a collection label based on its filename without the extension. Use collection-specific manifest bindings when the layers need different mappings.
+
+## GeoPackage
+
+A GeoPackage source is an OGC GeoPackage file (`.gpkg`): a SQLite database that lists its data tables in a `gpkg_contents` catalog. Cassiopeia reads every table listed with the `features` data type and every table listed with the `attributes` data type, then emits one record per row. Tile and gridded-coverage tables hold raster pyramids rather than records, so Cassiopeia skips them. An input with a `mappings` list reads only the tables the list names (see [Multiple tables](#multiple-tables)), and a table that cannot be read is skipped with a warning (see [Tables that cannot be read](#tables-that-cannot-be-read)).
+
+Each record has this general shape:
+
+~~~json
+{
+    "properties": {
+        "fid": 1,
+        "name": "Main station",
+        "active": true,
+        "level": 21.5,
+        "opened": "2026-06-03"
+    },
+    "geometry": {
+        "type": "Point",
+        "coordinates": [
+            14.51,
+            46.05
+        ]
+    }
+}
+~~~
+
+Table columns are under `properties`, named exactly as in the table. The primary key comes first under its own column name, usually `fid`, so a mapping can use it in the entity identifier. Cassiopeia converts each value by its column's declared type: `BOOLEAN` becomes a boolean, the integer types and `FLOAT`, `DOUBLE`, and `REAL` become numbers, `TEXT` stays a string, `DATE` becomes an ISO 8601 date such as `2026-06-03`, and `DATETIME` becomes an ISO 8601 timestamp such as `2026-06-03T12:30:05.250Z`. Besides the strict GeoPackage form, `DATETIME` text in the common ISO 8601 variants is accepted, such as second precision, a space separator, or a numeric UTC offset; an offset is kept in the output. A `BLOB` column becomes its standard base64 encoding, the form GDAL uses for binary fields when it writes GeoJSON. Cassiopeia omits `NULL` columns.
+
+Rows of an attributes table have no `geometry` member. A feature whose geometry is `NULL` or empty has no `geometry` member either.
+
+### Geometry and coordinate reference systems
+
+GeoPackage geometries are emitted as GeoJSON for use as NGSI-LD `GeoProperty` values. Each feature table names its coordinate reference system through the `srs_id` of its geometry column, which `gpkg_spatial_ref_sys` defines. Cassiopeia reads that definition, preferring the WKT2 form of the `gpkg_crs_wkt` extension when the file has one, and reprojects the geometry to EPSG:4326, using WGS84 longitude and latitude. An EPSG:4326 table is emitted unchanged, and so is any coordinate the reprojection does not move, such as one in an ETRS89 table, which EPSG transformation 1149 carries to WGS84 with no shift. A table whose definition is `undefined`, as it is for the reserved `srs_id` values `0` and `-1`, is assumed to be EPSG:4326 already: Cassiopeia emits its coordinates unchanged and logs a warning. A table whose geometry column names an `srs_id` that `gpkg_spatial_ref_sys` does not define, or whose definition Cassiopeia cannot parse, cannot be read and is skipped.
+
+Geometries keep their X and Y coordinates only; Z and M values are dropped. Curved geometry types, such as `CIRCULARSTRING` and `COMPOUNDCURVE`, have no GeoJSON form, and a row holding one fails the run.
+
+### Build feature
+
+GeoPackage support is the `geopackage` Cargo feature, on in the default build. The `geopackage-bundled` feature, also on by default, compiles a bundled SQLite from C and links it statically; a build with `geopackage` but without `geopackage-bundled` links the system SQLite instead. A build without `geopackage`, such as one made with `--no-default-features`, still detects a GeoPackage but reports it as unsupported instead of reading it. Run `cassiopeia --version` to see what a binary has: its `features` line shows `+geopackage` or `-geopackage`, and `+geopackage-bundled` or `-geopackage-bundled`. See [GeoPackage and SQLite](./getting-started.md#geopackage-and-sqlite).
+
+### Multiple tables
+
+A GeoPackage with one record table produces ordinary records without a collection label. A GeoPackage with several record tables, counting both feature and attributes tables, gives each table's records a collection label equal to the table name as `gpkg_contents` lists it. Use collection-specific manifest bindings when the tables need different mappings.
+
+An input with a single `mapping` reads every record table. An input with a `mappings` list reads only the tables whose names it lists, so a table no mapping uses is never opened and cannot fail the run. A listed name that matches no table yields no records. The labels are counted over every record table `gpkg_contents` lists, so a table keeps its label when it is the only one an input reads.
+
+### Tables that cannot be read
+
+A table that fails before Cassiopeia reads its first row is skipped, and every other table is still read. The run reports one `ingest-table-unreadable` warning per skipped table, naming the table and the file and giving the reason. A table fails this way when `gpkg_contents` lists it but the file has no table or view of that name, when a `features` table has no `gpkg_geometry_columns` row, when its coordinate reference system cannot be read, or when SQLite cannot select its rows.
+
+A view is the common case of the last. `gpkg_contents` may list a view as well as a table, but Cassiopeia identifies each row by the table's integer primary key, or by SQLite's `rowid` when there is none, and a view has neither, so every view is skipped. Reading a view needs the `geopackage` crate to read rows that have no row id, which it cannot yet. Until it can, convert a view you need into a table, or leave it out of a `mappings` list so it is not opened at all.
+
+The run fails when none of the tables it reads can be read, with an error naming the first one and why. A row that cannot be read or converted, such as one holding a curved geometry, still fails the run, because the records before it have already been sent.
+
+### Write-ahead logs
+
+Cassiopeia refuses a GeoPackage that has a SQLite write-ahead log beside it: a file named like the GeoPackage with `-wal` appended, such as `stations.gpkg-wal`. The input fails with an error naming the log, before SQLite opens the GeoPackage. The SQLite that Cassiopeia bundles predates the fix for [RUSTSEC-2026-0459](https://rustsec.org/advisories/RUSTSEC-2026-0459) (CVE-2026-119375), and so does any system SQLite older than 3.54.0: a crafted log whose page size differs from the GeoPackage's makes ordinary queries return leftover bytes of Cassiopeia's memory, which would then travel into the emitted entities. SQLite reads a log whenever one sits beside the database, whatever the database declares, so the presence of the log is what Cassiopeia refuses. Cassiopeia hands SQLite the GeoPackage's resolved absolute path, with every symbolic link followed, and looks for the log beside that path, which is where SQLite would read it.
+
+A log is usually left by a program that still has the GeoPackage open, such as QGIS. Close that program, which merges the log back into the GeoPackage and removes it, then run Cassiopeia again. Do not merge a log that came with a GeoPackage from a source you do not trust using another SQLite tool, which can be affected by the same flaw; ask the source for the GeoPackage without its log instead.
+
+## GRIB
+
+GRIB is a binary format for gridded meteorological and climate data. Cassiopeia supports GRIB1 and GRIB2 through the single `grib` source format and reads the edition from the file header.
+
+GRIB stores one field per parameter, while an NGSI-LD observation often needs several parameters at one location. Cassiopeia groups fields that share a grid, vertical level, reference time, and forecast time, then pivots them into one record for each unmasked grid cell. The resulting record contains:
+
+- `latitude` and `longitude` as separate numeric fields.
+- `level_type` and `level` when the field declares a vertical level (see [Accessing the level](#accessing-the-level)).
+- `referenceTime` when present.
+- `forecastTime` when present.
+- One field for each parameter, keyed by its Cassiopeia-canonical name.
+
+For example, a record may look like:
+
+~~~json
+{
+    "latitude": 46.0,
+    "longitude": 14.0,
+    "level_type": "height_above_ground",
+    "level": 2,
+    "referenceTime": "2026-08-23T00:00:00+00:00",
+    "forecastTime": "2026-08-23T00:00:00+00:00",
+    "temperature": 285.69,
+    "dewpoint": 284.99,
+    "humidity": 95.3
+}
+~~~
+
+Masked parameter values are omitted from a record. A grid cell for which every parameter is masked produces no record.
+
+### Canonical parameter names
+
+Both editions use the same name for a physical quantity, regardless of backend: a short, space-free, level-independent `snake_case` key. The key is meant to be read directly in a template, as in `{{ temperature }}`. A spaced WMO name would require `this['...']` bracket access. A kebab-case name such as `wind-u` would need it too: Cassiopeia rejects `{{ wind-u }}` when it loads the mapping, because Tera would read it as the subtraction `wind - u`, and the error suggests `this['wind-u']` instead. The same mapping therefore works across editions and backends. The canonical set is a curated vocabulary. Here are some of the most common keys:
+
+| Canonical key | Meaning | GRIB2 (discipline, category, number) | GRIB1 indicator |
+| --- | --- | --- | --- |
+| `temperature` | Air temperature | 0, 0, 0 | 11 |
+| `dewpoint` | Dew point temperature | 0, 0, 6 | 17 |
+| `humidity` | Relative humidity | 0, 1, 1 | 52 |
+| `precip` | Total precipitation | 0, 1, 8 | 61 |
+| `snow_depth` | Snow depth | 0, 1, 11 | 66 |
+| `wind_dir` | Wind direction | 0, 2, 0 | 31 |
+| `wind_speed` | Wind speed | 0, 2, 1 | 32 |
+| `wind_u` | Eastward wind component | 0, 2, 2 | 33 |
+| `wind_v` | Northward wind component | 0, 2, 3 | 34 |
+| `gust` | Wind gust speed | 0, 2, 22 | 180 |
+| `pressure` | Pressure | 0, 3, 0 | 1 |
+| `pressure_msl` | Pressure reduced to MSL | 0, 3, 1 | 2 |
+| `geopotential_height` | Geopotential height | 0, 3, 5 | 7 |
+| `cloud_cover` | Total cloud cover | 0, 6, 1 | 71 |
+| `cape` | Convective available potential energy | 0, 7, 6 | 157 |
+| `visibility` | Visibility | 0, 19, 0 | 20 |
+
+A parameter outside this vocabulary falls back to a stable synthetic code key: `d{discipline}c{category}n{number}` for GRIB2, identical from either backend, such as `d0c99n5`; and `g1t{table}c{centre}p{indicator}` for a GRIB1 local parameter. GRIB itself stores only numeric codes, not author-set names, so the fallback is a code. GRIB2 identifies a parameter by its `(discipline, parameterCategory, parameterNumber)` triple, while GRIB1 identifies it by `indicatorOfParameter`. The human-readable name comes from lookup tables, including the WMO master tables and centre-local tables, not from the message. A parameter missing from those tables genuinely has no name, so the synthetic code is the accurate representation. The curated vocabulary is large enough that this fallback is rare.
+
+### Accessing the level
+
+After normalization, a record carries two level fields that can be used directly in templates: `level_type`, a `snake_case` token, and `level`, the numeric value in that type's canonical unit. Isobaric levels use hectopascals, while heights and depths use metres. Surface-like types such as `surface` and `mean_sea_level` have no level value. Neither field needs `this[...]`:
+
+~~~json5
+pressureLevel: {
+    source: "{% if level_type == 'isobaric' %}{{ level }}{% endif %}",
+    transformation: "integer",
+}
+~~~
+
+The two coordinate fields can become a GeoJSON point with this mapping:
+
+~~~json5
+location: {
+    type: "GeoProperty",
+    source: [
+        "{{ longitude }}",
+        "{{ latitude }}",
+    ],
+    transformation: "point",
+}
+temperature: {
+    source: "{{ temperature }}",
+    transformation: "float",
+}
+~~~
+
+A gridded product often stores wind as eastward and northward components rather than as speed and direction. When the two components share a grid, level, and time, Cassiopeia pivots them into columns in one record. The `wind_speed` and `wind_direction` template helpers can then derive the reported quantities directly:
+
+~~~json5
+windSpeed: {
+    source: "{{ wind_speed(u=wind_u, v=wind_v) }}",
+    transformation: "float",
+}
+windDirection: {
+    source: "{{ wind_direction(u=wind_u, v=wind_v) }}",
+    transformation: "integer",
+}
+~~~
+
+Parameters measured at different vertical levels go into separate records because the level helps identify a grid slice. Two-metre temperature and ten-metre wind are therefore distinct records. Mapping them to the same entity identity, such as a code derived from the shared cell coordinates, merges their attributes into one observation. The [GRIB1 example](../examples/18-grib1-derived-values/index.md) works through this process from beginning to end.
+
+### Backends and features
+
+Two compile-time features select the backend for each edition. Both link the ecCodes C library, which the build compiles from source, can be toggled independently, and are enabled in the default build:
+
+- `grib2-full` routes GRIB2 through ecCodes. ecCodes computes coordinates for projected grids and reads the full parameter tables. With this feature off, GRIB2 falls back to the pure-Rust grib-rs decoder, which has no C dependency but handles only regular latitude/longitude grids.
+- `grib1` routes GRIB1 through ecCodes. With this feature off, the build reports GRIB1 as unsupported because there is no pure-Rust GRIB1 decoder.
+
+Both backends use the same canonical vocabulary and level normalization, so changing the backend does not require a different mapping. A build made with `--no-default-features` supports only regular-grid GRIB2 through grib-rs and rejects GRIB1. Add `--features grib1` or `--features grib2-full` to re-enable either ecCodes path.
+
+The backends decode values at different precisions. grib-rs decodes GRIB2 values in single precision, so each is written as the shortest decimal that reads back as the same single-precision number, such as `280.12` rather than `280.1199951171875`. ecCodes decodes both editions in double precision, and its values are written exactly, so a value from a default build can carry digits that the release binaries do not write.
+
+With the default build, ecCodes can decode projected GRIB2 grids, such as the Lambert conformal or polar stereographic grids used by regional models like HRRR. It handles these alongside global regular-grid products such as GFS and the ICON global model. Only the pure-Rust fallback, built with `grib2-full` off, is limited to regular latitude/longitude grids. With that fallback, a projected file fails to ingest instead of producing records. The two worked examples cover both editions: [GRIB1 regional](../examples/18-grib1-derived-values/index.md) and [GRIB2 global](../examples/19-grib2-byte-range/index.md).
+
+## NetCDF
+
+NetCDF is a self-describing format for gridded and station data. Copernicus services (CAMS air quality, CMEMS ocean, C3S and ERA5), national meteorological services, and ERDDAP and NCEI archives publish it. Cassiopeia reads the classic CDF-1, CDF-2, and CDF-5 formats and NetCDF-4, which is stored in HDF5, through the single `netcdf` source format. The reader is pure Rust, so every build includes it, the release binaries too, and it needs no system library.
+
+A NetCDF file produces the same wide location records as GRIB, so the same mapping style builds `AirQualityObserved`, `WeatherObserved`, or `SeaConditions` entities from either format. A file without a global `featureType` attribute is read as a grid, and so is one that declares `featureType = "GRID"`, which THREDDS servers write on every grid their NetCDF Subset Service returns. A file that declares `featureType = "timeSeries"` is read as station time series, as described in [Station time series](#station-time-series). Any other feature type is rejected.
+
+### Gridded records
+
+Each data variable located by latitude and longitude produces one record per unmasked cell of every latitude-longitude plane. Data variables with the same ordered dimensions and the same listed scalar and auxiliary coordinates pivot into columns of the same record, so a 2 m temperature and a 10 m wind told apart only by their scalar `height` produce records of their own. A record contains:
+
+- `latitude` and `longitude` as separate numeric fields. A longitude in `[0, 360)` is folded into `[-180, 180)`.
+- `time` when the variable has a time dimension, as an RFC 3339 timestamp (see [Time](#time)).
+- `level_type` and `level` when the variable has a vertical dimension that maps onto a level (see [Levels](#levels)).
+- One field for every other dimension, keyed by the name of its coordinate variable, such as an ensemble member `number` or a `forecast_reference_time`.
+- One field for each scalar coordinate, and each auxiliary coordinate over those other dimensions, that the data variable lists in its `coordinates` attribute. CF 1.11 section 5.7 makes a scalar coordinate equivalent to a dimension of length one, so a scalar `time` becomes the record's `time` and a scalar `height` its level. Any other is keyed by its variable name, such as the `reftime` or `time_run` forecast reference time THREDDS writes along the time dimension. When a dimension already gives the record its time or level, a second time or vertical coordinate is keyed by its variable name too.
+- One field for each data variable, keyed by its NetCDF variable name.
+
+For example, a record from a pressure-level file with temperature `t` and relative humidity `r` may look like:
+
+~~~json
+{
+    "latitude": 46.0,
+    "longitude": 14.5,
+    "time": "2026-08-23T06:00:00+00:00",
+    "level_type": "isobaric",
+    "level": 850,
+    "t": 285.3,
+    "r": 71.2
+}
+~~~
+
+Values are unpacked with `scale_factor` and `add_offset`. A value equal to `_FillValue` or `missing_value`, or outside `valid_min`, `valid_max`, or `valid_range`, counts as masked and is omitted from the record. A variable without a `_FillValue` attribute is also masked at its type's netCDF default fill value, the value the library leaves in an element no writer set; byte variables are exempt, since their whole range is commonly real data. A cell masked in every data variable produces no record. Data variable names are kept exactly as the producer wrote them. A name that is not a plain identifier, such as one containing a hyphen, is read in a template with `this['...']`.
+
+A single-precision value is written as the shortest decimal that reads back as the same single-precision number, the value xarray and netCDF4-python show: a stored `float` `34.408` is written as `34.408`, not its binary expansion `34.40800094604492`. Packed data is unpacked to the type of its `scale_factor` and `add_offset` (CF 1.11 section 8.1). With `float` attributes, a `byte`, `unsigned byte`, `short`, `unsigned short`, or `float` variable is unpacked in single precision and written the same way, so NOAA OISST's `sst`, a `short` with `scale_factor = 0.01f`, gives `-1.67` for a stored `-167`. With `double` attributes, or with packing the section does not allow, such as an `int` with `float` attributes, the data are unpacked in double precision. A value stored as `double` is written exactly. This holds for every value of a record, data variables, coordinates, and levels alike. The masks above compare the stored values before any unpacking, so rounding never decides whether a value is masked.
+
+### Coordinate roles
+
+Cassiopeia recognizes a coordinate by its CF attributes, never by its name. It checks the attributes CF 1.11 section 4 names in this order: `standard_name`, then `units`, then `axis`, then `positive`.
+
+| Role | Recognized by | Record key |
+| --- | --- | --- |
+| Latitude | `standard_name` `latitude`, or `units` `degrees_north`, `degree_north`, `degree_N`, `degrees_N`, `degreeN`, or `degreesN` | `latitude` |
+| Longitude | `standard_name` `longitude`, or `units` `degrees_east`, `degree_east`, `degree_E`, `degrees_E`, `degreeE`, or `degreesE` | `longitude` |
+| Time | `standard_name` `time`, `axis` `T`, or `<unit> since <epoch>` units on a variable with no other `standard_name` | `time` |
+| Vertical | a vertical `standard_name` such as `air_pressure`, `height`, `altitude`, `depth`, `model_level_number`, or a dimensionless coordinate such as `atmosphere_sigma_coordinate`; pressure `units`; `axis` `Z`; or a `positive` attribute | `level_type` and `level`, or the variable name when it maps onto no level |
+| Projected | `standard_name` `projection_x_coordinate`, `projection_y_coordinate`, `grid_longitude`, or `grid_latitude`, or `axis` `X` or `Y` without degree units | none on a grid, where the variable is skipped; the variable name on a station |
+| Other | anything else | the variable name |
+
+A variable called `lat` without these attributes is therefore not a latitude. A `forecast_reference_time` with epoch units has a standard name of its own, so it is emitted as a timestamp under `forecast_reference_time` rather than competing with the valid `time`.
+
+A data variable is a numeric variable with at least two dimensions that is neither a coordinate variable nor named by another variable's `bounds`, `climatology`, or `grid_mapping` attribute. It is skipped, with a warning that names it and the reason, when it holds characters or strings, when a dimension has no coordinate variable, when its horizontal axes are projected or curvilinear, or when more than one dimension has the time role or the vertical role. The run fails when no data variable remains. It also fails when two values would land under one record key, such as a data variable named `time` on a grid that also has a time coordinate, rather than letting one overwrite the other.
+
+### Levels
+
+A vertical coordinate maps onto the same `level_type` tokens GRIB uses, so a level condition in a template works for both formats:
+
+| CF vertical coordinate | `level_type` | `level` |
+| --- | --- | --- |
+| Pressure in `Pa`, `hPa`, `mbar`, or `millibar` | `isobaric` | hPa |
+| `standard_name` `height` in metres | `height_above_ground` | metres |
+| `standard_name` `altitude` or `height_above_mean_sea_level` in metres | `altitude_above_mean_sea` | metres |
+| `standard_name` `depth`, or `positive = "down"` and no vertical `standard_name`, in metres, under soil quantities | `depth_below_land` | metres |
+| The same depth under sea water quantities | `depth_below_sea` | metres |
+| `atmosphere_sigma_coordinate` | `sigma` | the coordinate value |
+
+A vertical `standard_name` other than `air_pressure` decides on its own, ahead of the units and of `positive`. A hybrid coordinate that declares `hPa`, as CAM history files do for their nominal `1000 * (a + b)` values, is therefore not read as a pressure. Any other vertical coordinate is emitted under its own variable name with its raw value. That includes a `model_level_number`, a height in kilometres, a `depth_below_geoid`, an ocean s-coordinate, and the hybrid sigma-pressure and hybrid height coordinates, whose values are not the model level numbers GRIB's `hybrid` level carries.
+
+CF's `depth` is the distance below a surface it does not name, so the data variables on the coordinate name it: those that span its dimension or list it in their `coordinates` attribute. A `standard_name` with the word `soil`, such as `soil_temperature` or `mass_content_of_water_in_soil_layer`, is a soil quantity, measured below the land surface like GRIB's `depth_below_land`. One with `sea_water` or `ocean`, such as `sea_water_salinity` or `ocean_mixed_layer_thickness`, is a sea water quantity. A variable without a standard name, such as a quality flag, or with one that is neither, such as `sea_ice_temperature`, does not count. A depth that no variable gives a surface, or that soil and sea water quantities share, is emitted under its own variable name with its raw value.
+
+### Time
+
+Every coordinate whose units take the form `<unit> since <epoch>` is decoded into an RFC 3339 timestamp ending in `+00:00`, whatever its role. The unit can be any UDUNITS spelling of seconds, minutes, hours, days, or weeks, such as `sec`, `msec`, or `milliseconds`, or `months` in the `360_day` calendar. Times are rounded to the microsecond, the finest a double counting days or seconds from a distant epoch can resolve, so a ten-minute series stored as fractional days reads `04:10:00` rather than `04:09:59.999999744`. A fraction of a second is written with its trailing zeros trimmed. The supported calendars are `standard` (also `gregorian`), `proleptic_gregorian`, `noleap` (also `365_day`), `all_leap` (also `366_day`), `360_day`, and `julian`. A variable without a `calendar` attribute uses `standard`.
+
+RFC 3339 and `xsd:dateTime` state dates in the proleptic Gregorian calendar. In the calendars of real days, `standard`, `proleptic_gregorian`, and `julian`, a time value is the real time elapsed since its epoch (CF 1.11 section 4.4.1) and names exactly one instant, which Cassiopeia writes as its Gregorian date. A `julian` date runs 13 days behind the Gregorian one from Julian 1900-03-01 to 2100-02-28, so `days since 2026-01-01` with value `0` is written as `2026-01-14T00:00:00+00:00`, and a February 29 only the Julian calendar has, such as day 1 of `days since 1900-02-28`, as `1900-03-13T00:00:00+00:00`. `standard` is the Julian calendar before 1582-10-15, so its earlier dates are converted the same way: `days since 1582-10-15` with value `-1` is `1582-10-14T00:00:00+00:00`. `proleptic_gregorian` dates, and `standard` dates from 1582-10-15 on, are written as the file states them.
+
+`noleap`, `all_leap`, and `360_day` are model calendars. Their dates name no real instant, so no conversion places them exactly, and each date keeps its label, as xarray's `convert_calendar` does: day 59 of a `noleap` 2024 is `2024-03-01T00:00:00+00:00`, where 59 days after Gregorian 2024-01-01 is February 29. A date the Gregorian calendar does not have keeps its label too: February 30 in `360_day`, and February 29 of a common year in `360_day` and `all_leap`, so day 59 of a `360_day` 2026 is `2026-02-30T00:00:00+00:00`. The record still carries such a date, so an entity name built from it still forms, but a `datetime` transformation cannot read it, so an attribute read from it is left out with an `extractor-timestamp-unreadable` warning, and an `observedAt` read from it with a `transform-observed-at-unreadable` warning. The run also reports one `ingest-dates-nonexistent` warning for each time variable holding such dates. It names the variable, the file, the calendar, and the first such date, and counts them.
+
+The epoch may end with a UTC designator: `Z`, `UTC`, `GMT`, or a zero offset such as `+00:00`, `+0000`, or the unsigned `0:00` the NCEI netCDF templates prescribe. The run fails when the epoch names a non-zero offset, when the `calendar` attribute names anything else (including `utc`, `tai`, and `none`, whose leap-second or calendar-free arithmetic Cassiopeia does not perform), or when the units contain non-ASCII characters. A coordinate in the time role whose units name no epoch, such as the `day as %Y%m%d.%f` CDO writes for an absolute time axis, is emitted as its raw number.
+
+### Station time series
+
+A file that declares `featureType = "timeSeries"` holds observations at fixed stations, a CF discrete sampling geometry (CF 1.11 section 9 and Appendix H.2). Cassiopeia emits one record per observation and recognizes all five CF layouts:
+
+| Layout | How it is recognized |
+| --- | --- |
+| Single | The latitude is a scalar, and the data runs along the time dimension. |
+| Orthogonal multidimensional | The data has a station and a time dimension, in either order, and all stations share the `time(time)` coordinate. |
+| Incomplete multidimensional | The time is `time(station, obs)`, padded with fill values where a station has fewer observations. |
+| Contiguous ragged | A count variable carries `sample_dimension`; each station's observations follow those of the station before it. |
+| Indexed ragged | An index variable carries `instance_dimension`; each observation names its station. |
+
+A dimension of length one that is neither the station nor the time dimension holds one value for every observation. An OceanSITES station file, whose `LATITUDE`, `LONGITUDE`, and `HEIGHT` each have a dimension of length one, is therefore read as a single station, with `HEIGHT` as its level. A file whose latitude runs along a station dimension and whose time runs along another is read as orthogonal only when some variable spans both dimensions. Otherwise it is a ragged file whose count or index variable lacks its `sample_dimension` or `instance_dimension`, and the run fails rather than repeating every observation at every station.
+
+The coordinates come from the variables the data variables list in their `coordinates` attribute, the coordinate variables, and the variable whose `cf_role` is `timeseries_id`. The latitude, longitude, and time are required, and the run fails when one is missing. A vertical station coordinate, such as an `altitude`, becomes `level_type` and `level`. A station name or identifier is emitted as a string under its own name, and any other listed coordinate as a number or a string under its own name. A station variable that no `coordinates` attribute lists and that has no `cf_role` is not emitted. A text variable that varies by observation, such as the per-observation `station_name` ERDDAP writes or an OceanSITES data mode flag, is emitted as a string under its own name. An empty string counts as missing. For example:
+
+~~~json
+{
+    "latitude": 46.07,
+    "longitude": 14.52,
+    "time": "2026-08-23T06:00:00+00:00",
+    "level_type": "altitude_above_mean_sea",
+    "level": 299,
+    "station_name": "LJUBLJANA",
+    "pm10": 18.2,
+    "no2": 21.5
+}
+~~~
+
+An observation whose time is masked is padding and is skipped. A masked data value is omitted from its record, and an observation masked in every data variable produces no record. A count or index that points outside its dimension fails the run. When the counts of a contiguous ragged array cover fewer elements than its sample dimension, the elements left over belong to no station and are skipped with a warning.
+
+### Limitations
+
+- Only the root group is read. A NetCDF-4 file with subgroups logs a warning and ignores them.
+- Projected and curvilinear grids are skipped, because their cells have no latitude and longitude coordinate variables to read. That includes a Lambert grid whose two-dimensional latitude and longitude are auxiliary coordinates, as the HRRR and MEPS forecasts are. Feature types other than `timeSeries`, such as `point`, `trajectory`, `profile`, `timeSeriesProfile`, and `trajectoryProfile`, are rejected.
+- A station file's coordinates and data variables are read whole and held in memory together, along with one entry per observation, so a very large station archive needs memory for all of its variables at once.
+- NetCDF-4 variables compressed with deflate, shuffle, Fletcher-32, SZIP, N-bit, scale-offset, or LZ4 are read. A variable compressed with another HDF5 filter, such as zstd or Blosc, or stored as an HDF5 virtual dataset fails to read.
+
+## Choosing a format for a mapping
+
+Start by looking at one profiled record, not at the original file alone. Then build the mapping around the fields Cassiopeia actually exposes:
+
+1. Identify the record boundary: row, JSON object, GeoJSON feature, placemark, XML repeated child, Shapefile feature, GeoPackage table row, grid cell, station observation, or SensorThings Thing or Observation.
+2. Locate the values in the record shape, including containers such as `properties`, `geometry`, and XML `@` or `#` fields.
+3. Decide whether the source value already has the required JSON type or needs a transformation.
+4. For geometry, select `GeoProperty`. A complete GeoJSON geometry needs no transformation; coordinates need the geometry transformation that matches the type to build.
+5. For KML folders, multi-layer Shapefiles, or multi-table GeoPackages, decide whether collection-specific mappings are needed.
+
+The [mapping guide](./mapping.md) explains the mapping language in detail. The format page tells you what the source record looks like; it does not replace the mapping's responsibility to choose the target entity identity and attribute model.
+
+## Next steps
+
+- [Write a mapping](./mapping.md): build the entity from the record fields shown here.
+- [Templates](./templates.md): learn the expression language that a mapping's `source` uses.
+- [Running Cassiopeia](./running.md#choose-the-source): declare an input and its format on the command line.

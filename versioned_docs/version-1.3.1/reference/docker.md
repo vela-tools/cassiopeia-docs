@@ -1,0 +1,278 @@
+---
+title: "Run with Docker or Podman"
+sidebar_label: "Running with Docker"
+description: "Run the Cassiopeia container image from GHCR, mount the paths it needs, and keep the schema catalog, cursors, inputs, and outputs between runs."
+keywords: ["Docker", "Podman", "container", "GHCR", "volumes", "image", "cursors", "docker stop", "SBOM", "VEX"]
+---
+# Running Cassiopeia with Docker
+
+Cassiopeia publishes a Docker image, so you can run the pipeline without installing Rust or system libraries on the host. This guide explains the image, its paths inside the container, and the volumes that keep the catalog, inputs, and outputs between runs.
+
+For a quick check, use the one-line command in [Getting started](../guides/getting-started.md#run-with-docker). This page covers the rest.
+
+## The image
+
+The image is published to the GitHub Container Registry as `ghcr.io/vela-tools/cassiopeia`. It supports both `linux/amd64` and `linux/arm64`, so it runs natively on Intel, AMD, Apple silicon, and other ARM hosts.
+
+The tags match the releases:
+
+| Tag | Points at |
+| --- | --- |
+| `vX.Y.Z` | A specific release, for example `v1.3.1`. Pin to this for reproducible runs. |
+| `latest` | The most recent stable release. Never a prerelease. |
+| `vX.Y.Z-alpha.N`, `-beta.N`, `-rc.N` | A prerelease. These do not move `latest`. |
+
+Pull the image:
+
+```bash
+docker pull ghcr.io/vela-tools/cassiopeia:latest
+```
+
+Unlike the prebuilt release binaries, the image is a **default build**. Its runtime layer links ecCodes, so it decodes both GRIB2 and GRIB1, and it reads GeoPackage files through SQLite 3.54.1, which the image build compiles from the official source and links statically in place of the copy the `geopackage-bundled` feature would bundle, so `--version` shows `+geopackage` with `-geopackage-bundled`. That SQLite carries the fix for the flaw described under [Write-ahead logs](../guides/source-formats.md#write-ahead-logs). NetCDF needs neither, since every build reads it in pure Rust. The host does not need any additional system dependency for either. See [GRIB1 and ecCodes](../guides/getting-started.md#grib1-and-eccodes) and [GeoPackage and SQLite](../guides/getting-started.md#geopackage-and-sqlite) for background.
+
+The runtime layer is based on the distroless `gcr.io/distroless/cc-debian13` image, which carries the Debian 13 C and C++ runtime libraries and the CA certificates but no shell, no package manager, and no system SQLite. Cassiopeia is the only program in it, so `docker exec` into a shell is not possible; run `cassiopeia` subcommands through `docker run` instead.
+
+The image's binary is built with [`cargo auditable`](https://github.com/rust-secure-code/cargo-auditable), which embeds the list of Rust crates compiled into it, so `cargo audit bin` and container scanners such as Trivy and Grype can check those crates against the RustSec advisory database. Such a scan reports RUSTSEC-2026-0459 against the `libsqlite3-sys` crate: the advisory covers the SQLite that crate bundles, and the image does not use that copy but the SQLite 3.54.1 described above, which carries the fix. The image build runs `cargo audit bin` on the binary and fails when it finds any other vulnerability. The repository's VEX document, `.vex/cassiopeia.openvex.json`, tells a scanner given it with `--vex` that this advisory and the others Cassiopeia ignores don't affect the image. [Advisory rulings](./advisory-rulings.md) holds the proof behind each.
+
+The image carries its licence texts in `/usr/share/doc/cassiopeia`. `LICENSE.md` and `NOTICE.md` are Cassiopeia's own. `third-party-licenses.md` lists every crate the image's binary is built from with the licence it is used under, followed by the text of each licence and the `NOTICE` file of each crate that ships one. The C libraries the build compiles in each have a directory beside it: `eccodes`, `eckit` and `libaec` hold the licence and notice files of their source, and `sqlite` holds the public-domain dedication that opens SQLite's source. OpenJPEG comes from Debian with its copyright file at `/usr/share/doc/libopenjp2-7/copyright`. The image has no shell to read them with, so copy them out, for example with `docker cp "$(docker create ghcr.io/vela-tools/cassiopeia:latest)":/usr/share/doc/cassiopeia .`.
+
+## Verifying the image
+
+Every published image is signed with [cosign](https://docs.sigstore.dev/) using keyless signing, so there is no public key to distribute. The signature carries a short-lived certificate that names the repository, the workflow, and the git ref the image was built from, and cosign records it in the public Sigstore transparency log. Install cosign, then verify a release:
+
+```bash
+cosign verify ghcr.io/vela-tools/cassiopeia:v1.3.1 \
+    --certificate-identity-regexp '^https://github\.com/vela-tools/cassiopeia/\.github/workflows/docker\.yaml@refs/tags/v' \
+    --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+Both flags are necessary. Without them cosign confirms only that somebody signed the image; with them it confirms the signature came from this repository's `docker.yaml` workflow running on a release tag. Builds from other refs are signed too, but their certificate names a branch, so the expression above rejects them.
+
+The signature sits on the multi-platform manifest list, which is what a tag resolves to, so one check covers `linux/amd64` and `linux/arm64`. Cosign signs each per-platform manifest inside the list as well, so a single architecture copied into another registry still verifies once the list is gone. To check the exact image you are about to run, pass a digest instead of a tag:
+
+```bash
+cosign verify ghcr.io/vela-tools/cassiopeia@sha256:... \
+    --certificate-identity-regexp '^https://github\.com/vela-tools/cassiopeia/\.github/workflows/docker\.yaml@refs/tags/v' \
+    --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+Each image also carries a SLSA build provenance attestation, stored by GitHub and pushed to the registry beside the image. Where the cosign signature says the image was signed by this repository, the attestation records how it was built: the commit, the workflow, and the run. Verify it with the GitHub CLI:
+
+```bash
+gh attestation verify oci://ghcr.io/vela-tools/cassiopeia:v1.3.1 --repo vela-tools/cassiopeia
+```
+
+Add `--signer-workflow vela-tools/cassiopeia/.github/workflows/docker.yaml` to pin the check to the image workflow rather than accepting any workflow in the repository.
+
+Each image also carries an OpenVEX attestation of the VEX document its commit holds, on the manifest list and on each platform image, so a scanner that looks it up by the digest it pulled finds it. It tells scanners which advisories don't affect the image, as [Advisory rulings](./advisory-rulings.md) describes. Verify it with:
+
+```bash
+gh attestation verify oci://ghcr.io/vela-tools/cassiopeia:latest --repo vela-tools/cassiopeia --predicate-type https://openvex.dev/ns/v0.2.0
+```
+
+Each platform image also carries two SBOMs that [Syft](https://github.com/anchore/syft) writes from it, one in SPDX 2.3 and one in CycloneDX 1.6, each attested to that platform image. The release attaches the CycloneDX ones as `cassiopeia-linux-amd64.cdx.json` and `cassiopeia-linux-arm64.cdx.json`, for tools that fetch nothing from a registry. An SBOM describes one platform image, so its attestation sits on that image's digest rather than on the manifest list. List the platform digests, then verify each SBOM by its predicate type:
+
+```bash
+docker buildx imagetools inspect ghcr.io/vela-tools/cassiopeia:latest
+gh attestation verify oci://ghcr.io/vela-tools/cassiopeia@sha256:... --repo vela-tools/cassiopeia --predicate-type https://spdx.dev/Document/v2.3
+gh attestation verify oci://ghcr.io/vela-tools/cassiopeia@sha256:... --repo vela-tools/cassiopeia --predicate-type https://cyclonedx.org/bom
+```
+
+## Running the container
+
+The image's entrypoint is the `cassiopeia` binary. Docker passes everything after the image name to that command. Check that it runs:
+
+```bash
+docker run --rm ghcr.io/vela-tools/cassiopeia:latest --version
+```
+
+`--rm` removes the container when the command exits. Cassiopeia runs a batch job, not a service, so the examples below use `--rm`. Put anything you want to keep on a mounted volume; files inside the container disappear with it.
+
+The same pattern works for every subcommand. To see the flags for `map`:
+
+```bash
+docker run --rm ghcr.io/vela-tools/cassiopeia:latest map --help
+```
+
+## How the container lays out its files
+
+Inside a container, Cassiopeia switches from its per-user host directories to the system paths defined by the Filesystem Hierarchy Standard. These are the paths you mount volumes onto, and the image creates them in advance.
+
+| What | Container path | Kind |
+| --- | --- | --- |
+| Configuration file | `/etc/cassiopeia/config.toml` | Auto-discovered on every run |
+| Named mappings | `/etc/cassiopeia/mappings` | User-authored configuration |
+| Smart Data Models catalog | `/var/lib/cassiopeia/schemas` | Downloaded application data |
+| Cursor stores | `/var/lib/cassiopeia/cursors` | Read positions a later run resumes from |
+| Log files | `/var/log/cassiopeia/logs` | Volatile run state |
+| Scratch folders | `/tmp` | The current cycle's downloads, removed when the cycle ends |
+
+A cycle downloads remote inputs and writes SensorThings snapshots into a scratch folder under `/tmp`, in the container's writable layer, and removes it when the cycle ends, whether it completed, failed, or was stopped. A scheduled container's disk use therefore does not grow from one cycle to the next. `/tmp` needs room for one cycle's downloads at a time; mount a volume there to keep large downloads out of the writable layer. See [Choose the source](../guides/running.md#choose-the-source).
+
+Cassiopeia detects the container from the markers provided by Docker. If the runtime is not recognised, it falls back to the host-style layout under `/root`. You can also set these paths explicitly in configuration or through the environment, as described in [Configuration and environment](#configuration-and-environment).
+
+Inputs and outputs are not fixed paths. Mount them wherever you like, then refer to them with `--input` and `--output` using paths inside the container. The examples below use `/data` for inputs and `/out` for outputs.
+
+## Persisting the Smart Data Models catalog
+
+`cassiopeia sdm download` fetches the schema catalog used by validation and stores it at `/var/lib/cassiopeia/schemas` inside the container. Because `--rm` removes that directory with the container, a catalog downloaded in one `docker run` is gone before the next run. Download it once into a volume instead.
+
+Mount a volume at the schemas directory so the catalog persists. A named volume is the simplest option:
+
+```bash
+# Download the catalog once into a named volume.
+docker run --rm \
+    -v cassiopeia-schemas:/var/lib/cassiopeia/schemas \
+    ghcr.io/vela-tools/cassiopeia:latest sdm download
+```
+
+Mount the same volume on later runs and the catalog will already be there. To inspect it:
+
+```bash
+docker run --rm \
+    -v cassiopeia-schemas:/var/lib/cassiopeia/schemas \
+    ghcr.io/vela-tools/cassiopeia:latest sdm list
+```
+
+Use a host directory instead if you want to share the catalog with a non-Docker install:
+
+```bash
+docker run --rm \
+    -v "$HOME/.cassiopeia/schemas:/var/lib/cassiopeia/schemas" \
+    ghcr.io/vela-tools/cassiopeia:latest sdm download
+```
+
+The catalog is optional. You do not need it when a run uses only a custom schema or skips validation. The terminal interfaces (`explorer`, `wizard`) and examples that use a published Smart Data Model do expect it to be present.
+
+## Persisting cursors
+
+An incremental SensorThings read keeps how far it has read each data stream in a cursor store at `/var/lib/cassiopeia/cursors`, and the next run resumes from there. A container started with `--rm` loses that directory with it, so its next run would read every data stream from its initial point again. Mount a named volume at the cursors directory instead:
+
+```bash
+docker run --rm \
+    -v "$PWD:/data:ro" \
+    -v cassiopeia-schemas:/var/lib/cassiopeia/schemas \
+    -v cassiopeia-cursors:/var/lib/cassiopeia/cursors \
+    ghcr.io/vela-tools/cassiopeia:latest \
+    map --manifest /data/rivm-air.json5
+```
+
+A running job holds each cursor it reads through, so a second container that reads through the same cursor in the same volume is refused before it sends any request. See [Reading new readings](../guides/source-formats.md#reading-new-readings).
+
+To list, show or reset the cursors, run a cursor command against the same volume while no job holds them. Stop a scheduled job with `docker stop` first:
+
+```bash
+docker run --rm \
+    -v cassiopeia-cursors:/var/lib/cassiopeia/cursors \
+    ghcr.io/vela-tools/cassiopeia:latest \
+    sensorthings cursor list
+```
+
+## A full run with volumes
+
+A file run reads a source and a mapping, uses the catalog if validation is enabled, and writes entities to an output directory. Mount the source and mapping read-only at `/data`, mount a writable directory at `/out`, and mount the schemas volume:
+
+```bash
+docker run --rm \
+    -v "$PWD:/data:ro" \
+    -v "$PWD/out:/out" \
+    -v cassiopeia-schemas:/var/lib/cassiopeia/schemas \
+    ghcr.io/vela-tools/cassiopeia:latest \
+    map \
+      --input /data/stations.csv \
+      --mapping /data/station.json5 \
+      --output /out
+```
+
+The paths in this command are paths inside the container:
+
+- `--input` and `--output` are **container** paths. `/data/stations.csv` is the source as the container sees it, not the host path. The file writer creates the output directory if it is missing, so an empty `/out` is fine.
+- Mount inputs read-only (`:ro`) when the run only reads them. Cassiopeia never writes to its input.
+- Cassiopeia writes one file per entity type to the output directory. On the host, those files appear in `./out`.
+
+If a manifest refers to mappings by name instead of by path, also mount the mapping folder at `/etc/cassiopeia/mappings`. Cassiopeia resolves the names from that directory.
+
+## Sending entities to a context broker
+
+To send entities to a broker, the container must be able to reach it over the network. Remember that `localhost` inside the container refers to the container, not the host. Choose the address that matches your setup:
+
+- **The broker is another container in the same Docker network.** Address it by its service name, for example `http://scorpio:9090/`.
+- **The broker runs on the host** (Docker Desktop on macOS or Windows). Use `http://host.docker.internal:1026/`.
+- **The broker runs on the host** (Docker Engine on Linux). Add `--network host` to the `docker run` command and address the broker as `http://localhost:1026/`, or use the host's LAN address.
+
+```bash
+docker run --rm \
+    -v "$PWD:/data:ro" \
+    -v cassiopeia-schemas:/var/lib/cassiopeia/schemas \
+    ghcr.io/vela-tools/cassiopeia:latest \
+    map \
+      --input /data/readings.json \
+      --mapping /data/reading.json5 \
+      --writer context-broker \
+      --broker-url http://host.docker.internal:1026/ \
+      --output-header "Authorization: Bearer replace-me"
+```
+
+Pass broker credentials with `--output-header`, and a source's API key with `--input-header`, just as you would on the host. A run from a mounted manifest reads its credentials from the environment instead: pass each with `-e`, such as `-e BROKER_TOKEN`, and name it as `${BROKER_TOKEN}` in the manifest, as the [manifest guide](../guides/manifests.md#environment-variables) describes. The [output guide](../guides/output.md#send-to-a-context-broker) covers broker operations and delivery options.
+
+## Configuration and environment
+
+A configuration file controls engine settings such as batch sizes, resolver stores, and logging. Cassiopeia looks for it at `/etc/cassiopeia/config.toml` inside the container, so mount your file there:
+
+```bash
+docker run --rm \
+    -v "$PWD/config.toml:/etc/cassiopeia/config.toml:ro" \
+    -v "$PWD:/data:ro" -v "$PWD/out:/out" \
+    ghcr.io/vela-tools/cassiopeia:latest \
+    map -i /data/stations.csv -m /data/station.json5 -o /out
+```
+
+Generate a starting file with `docker run --rm -v "$PWD:/out" ghcr.io/vela-tools/cassiopeia:latest config generate -o /out/config.toml`, edit it, and mount it as above.
+
+Every configuration setting also has an environment variable. Build its name from `CASSIOPEIA_`, the section, `__` (two underscores), and the upper-case key. This works well in Compose, where environment variables live alongside the service definition. These settings are especially useful in a container because they change the default file locations:
+
+| Variable | Overrides |
+| --- | --- |
+| `CASSIOPEIA_SCHEMAS__FOLDER` | Where the catalog is read and written |
+| `CASSIOPEIA_MAPPINGS__FOLDER` | Where named mappings are resolved |
+| `CASSIOPEIA_CURSORS__FOLDER` | Where cursor stores are kept |
+| `CASSIOPEIA_PIPELINE__BATCH_SIZE` | Records per batch |
+
+To store the catalog at another path, point the variable at a mounted directory and mount the volume there:
+
+```bash
+docker run --rm \
+    -e CASSIOPEIA_SCHEMAS__FOLDER=/catalog \
+    -v cassiopeia-schemas:/catalog \
+    ghcr.io/vela-tools/cassiopeia:latest sdm download
+```
+
+The [manifest guide](../guides/manifests.md) and [running guide](../guides/running.md) describe the settings. Only the way you provide them changes in a container.
+
+## File ownership
+
+The container runs as `root` by default, so files written to a mounted host directory belong to `root`. To use your own user, pass `--user "$(id -u):$(id -g)"`. Make sure that user can write to every output and schema directory. If the run downloads the catalog, point `CASSIOPEIA_SCHEMAS__FOLDER` at a writable directory because the image's `/var/lib/cassiopeia/schemas` directory belongs to `root`. An incremental read writes its cursors, so point `CASSIOPEIA_CURSORS__FOLDER` at a writable directory for the same reason.
+
+## A scheduled container
+
+Commands that use a schedule flag (`--every`, `--cron`, or `--at`) keep running after the first cycle. Run them as a long-lived container: omit `--rm`, add a restart policy, and mount the volumes the schedule needs:
+
+```bash
+docker run -d --name cassiopeia-hourly \
+    --restart unless-stopped \
+    -v "$PWD:/data:ro" -v "$PWD/out:/out" \
+    -v cassiopeia-schemas:/var/lib/cassiopeia/schemas \
+    ghcr.io/vela-tools/cassiopeia:latest \
+    map -i /data/stations.csv -m /data/station.json5 -o /out --every 1h
+```
+
+`docker stop cassiopeia-hourly` sends SIGTERM, which ends the job once its current cycle reaches a stopping point, as Ctrl+C does. The log then ends with `Schedule finished`, and the container exits with code 0. Between two cycles, the job ends within a second. `docker stop` waits 10 seconds before it kills the container. Give a cycle that can take longer to reach a stopping point more time with `docker stop -t 60 cassiopeia-hourly`, or with `--stop-timeout 60` on `docker run`. See [Stop a run](../guides/running.md#stop-a-run) for what a stopped cycle keeps.
+
+The [scheduling guide](../guides/scheduling.md) explains timezone handling for `--cron` and `--at`. To set the container's timezone, add `-e TZ=Europe/Ljubljana`.
+
+## Next steps
+
+- [Getting started](../guides/getting-started.md): install Cassiopeia and read about GRIB1.
+- [Running Cassiopeia](../guides/running.md): the complete `map` reference, with or without Docker.
+- [Output](../guides/output.md): file framing, representations, and broker delivery.
+- [Manifests](../guides/manifests.md): package a complete run in a file you can mount and reuse.
